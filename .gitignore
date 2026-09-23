@@ -18,3 +18,6 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Documents (proposals, RFPs, non-code assets)
+*.pdf
