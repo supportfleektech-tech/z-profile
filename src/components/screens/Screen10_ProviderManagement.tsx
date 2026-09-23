@@ -185,3 +185,4 @@ export const Screen10_ProviderManagement: React.FC = () => {
     </div>
   );
 };
+export default Screen10_ProviderManagement;

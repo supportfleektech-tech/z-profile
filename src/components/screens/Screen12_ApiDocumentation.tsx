@@ -7,7 +7,7 @@ export const Screen12_ApiDocumentation: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'Overview' | 'Authentication' | 'Endpoints' | 'SDKs' | 'Examples'>('Overview');
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
-  const [apiKey, setApiKey] = useState('iprs_live_98a72b4c81ef049d91');
+  const [apiKey, setApiKey] = useState(import.meta.env.VITE_DEMO_API_KEY || '');
   const [keyGenerated, setKeyGenerated] = useState(false);
   const [copiedEndpoint, setCopiedEndpoint] = useState<string | null>(null);
 
@@ -202,3 +202,4 @@ export const Screen12_ApiDocumentation: React.FC = () => {
     </div>
   );
 };
+export default Screen12_ApiDocumentation;

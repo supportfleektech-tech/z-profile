@@ -129,3 +129,4 @@ export const Screen11_PricingTiers: React.FC = () => {
     </div>
   );
 };
+export default Screen11_PricingTiers;

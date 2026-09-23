@@ -300,3 +300,4 @@ export const Screen6_Cases: React.FC<Screen6CasesProps> = ({ onSelectCase }) => 
     </div>
   );
 };
+export default Screen6_Cases;

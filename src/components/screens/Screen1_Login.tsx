@@ -10,7 +10,7 @@ interface Screen1LoginProps {
 export const Screen1_Login: React.FC<Screen1LoginProps> = ({ onLoginSuccess }) => {
   const { login, isAuthenticated } = useAppData();
   const [email, setEmail] = useState('admin@iprs.co.ke');
-  const [password, setPassword] = useState('iprs-secure-2026');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -203,3 +203,4 @@ export const Screen1_Login: React.FC<Screen1LoginProps> = ({ onLoginSuccess }) =
     </div>
   );
 };
+export default Screen1_Login;

@@ -1,50 +1,10 @@
 import React, { useEffect } from 'react';
-import {
-  LogIn,
-  LayoutDashboard,
-  Search,
-  UserCheck,
-  FileBarChart2,
-  Briefcase,
-  BarChart3,
-  CreditCard,
-  Shield,
-  Server,
-  Layers,
-  Code2,
-  UserCog,
-  Bell,
-  Smartphone,
-  LayoutGrid,
-  ChevronLeft,
-  ChevronRight,
-  Menu,
-  X,
-  Command,
-} from 'lucide-react';
+import { ChevronLeft, ChevronRight, Menu, X, Command } from 'lucide-react';
 import { useAppRouter } from '../../context/RouterContext';
 import { useAppData } from '../../context/AppDataContext';
 import { platformRoutes, PageRoute } from '../../types/routes';
 import { IprsLogo } from '../common/IprsLogo';
-
-const iconMap: Record<string, React.ReactNode> = {
-  LogIn: <LogIn size={16} />,
-  LayoutDashboard: <LayoutDashboard size={16} />,
-  Search: <Search size={16} />,
-  UserCheck: <UserCheck size={16} />,
-  FileBarChart2: <FileBarChart2 size={16} />,
-  Briefcase: <Briefcase size={16} />,
-  BarChart3: <BarChart3 size={16} />,
-  CreditCard: <CreditCard size={16} />,
-  Shield: <Shield size={16} />,
-  Server: <Server size={16} />,
-  Layers: <Layers size={16} />,
-  Code2: <Code2 size={16} />,
-  UserCog: <UserCog size={16} />,
-  Bell: <Bell size={16} />,
-  Smartphone: <Smartphone size={16} />,
-  LayoutGrid: <LayoutGrid size={16} />,
-};
+import { iconMap } from '../../utils/iconRegistry';
 
 const categories = [
   { key: 'core', label: 'Core' },
@@ -156,7 +116,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children, onOpenCommandPalet
                       }`}
                     >
                       <span className={`shrink-0 relative ${isActive ? 'text-white' : 'text-cyan-500/80'}`}>
-                        {iconMap[route.icon] || <LayoutGrid size={16} />}
+                        {iconMap[route.icon] || iconMap.LayoutGrid}
                         {showBadge && collapsed && (
                           <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-rose-500" />
                         )}
@@ -281,7 +241,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children, onOpenCommandPalet
             className="p-2 rounded-lg bg-sky-950/80 border border-sky-800 text-slate-400 hover:text-cyan-300"
             aria-label="Search"
           >
-            <Search size={16} />
+            {iconMap.Search}
           </button>
         </div>
 

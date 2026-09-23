@@ -155,7 +155,7 @@ export const Screen4_IdentityProfile: React.FC<Screen4Props> = ({ onViewDetailed
               <span className="text-[10px] text-slate-400">Risk</span>
               <span className="text-sm font-black font-mono text-emerald-400">{profile.riskScore}%</span>
               <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold">
-                {profile.riskLevel}
+                {profile.trustLevel}
               </span>
             </div>
           </div>
@@ -206,3 +206,4 @@ export const Screen4_IdentityProfile: React.FC<Screen4Props> = ({ onViewDetailed
     </div>
   );
 };
+export default Screen4_IdentityProfile;

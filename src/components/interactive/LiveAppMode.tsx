@@ -1,23 +1,6 @@
 import React, { useState } from 'react';
-import {
-  LogIn,
-  LayoutDashboard,
-  Search,
-  UserCheck,
-  FileCheck2,
-  Briefcase,
-  BarChart3,
-  CreditCard,
-  Shield,
-  Server,
-  Layers,
-  Code2,
-  UserCog,
-  Bell,
-  Smartphone,
-  ChevronRight,
-  ArrowLeft,
-} from 'lucide-react';
+import { ChevronRight, ArrowLeft } from 'lucide-react';
+import { iconMap } from '../../utils/iconRegistry';
 import { Screen1_Login } from '../screens/Screen1_Login';
 import { Screen2_Dashboard } from '../screens/Screen2_Dashboard';
 import { Screen3_NewSearch } from '../screens/Screen3_NewSearch';
@@ -46,21 +29,21 @@ export const LiveAppMode: React.FC<LiveAppModeProps> = ({
   const [activeScreen, setActiveScreen] = useState<number>(initialScreenId);
 
   const menuItems = [
-    { id: 1, label: '1. Login Page', icon: <LogIn size={15} /> },
-    { id: 2, label: '2. Dashboard (Overview)', icon: <LayoutDashboard size={15} /> },
-    { id: 3, label: '3. New Search / Investigation', icon: <Search size={15} /> },
-    { id: 4, label: '4. Identity Profile (Results)', icon: <UserCheck size={15} /> },
-    { id: 5, label: '5. Detailed Report View', icon: <FileCheck2 size={15} /> },
-    { id: 6, label: '6. Cases / Investigations', icon: <Briefcase size={15} /> },
-    { id: 7, label: '7. Reports & Analytics', icon: <BarChart3 size={15} /> },
-    { id: 8, label: '8. Billing & Subscriptions', icon: <CreditCard size={15} /> },
-    { id: 9, label: '9. Admin Console', icon: <Shield size={15} /> },
-    { id: 10, label: '10. Provider Management', icon: <Server size={15} /> },
-    { id: 11, label: '11. Pricing & Tiers', icon: <Layers size={15} /> },
-    { id: 12, label: '12. API Documentation', icon: <Code2 size={15} /> },
-    { id: 13, label: '13. User Profile & Settings', icon: <UserCog size={15} /> },
-    { id: 14, label: '14. Alerts & Notifications', icon: <Bell size={15} /> },
-    { id: 15, label: '15. Mobile Responsive View', icon: <Smartphone size={15} /> },
+    { id: 1, label: '1. Login Page', icon: iconMap.LogIn || <ArrowLeft size={15} /> },
+    { id: 2, label: '2. Dashboard (Overview)', icon: iconMap.LayoutDashboard || <ArrowLeft size={15} /> },
+    { id: 3, label: '3. New Search / Investigation', icon: iconMap.Search || <ArrowLeft size={15} /> },
+    { id: 4, label: '4. Identity Profile (Results)', icon: iconMap.UserCheck || <ArrowLeft size={15} /> },
+    { id: 5, label: '5. Detailed Report View', icon: iconMap.FileCheck2 || <ArrowLeft size={15} /> },
+    { id: 6, label: '6. Cases / Investigations', icon: iconMap.Briefcase || <ArrowLeft size={15} /> },
+    { id: 7, label: '7. Reports & Analytics', icon: iconMap.BarChart3 || <ArrowLeft size={15} /> },
+    { id: 8, label: '8. Billing & Subscriptions', icon: iconMap.CreditCard || <ArrowLeft size={15} /> },
+    { id: 9, label: '9. Admin Console', icon: iconMap.Shield || <ArrowLeft size={15} /> },
+    { id: 10, label: '10. Provider Management', icon: iconMap.Server || <ArrowLeft size={15} /> },
+    { id: 11, label: '11. Pricing & Tiers', icon: iconMap.Layers || <ArrowLeft size={15} /> },
+    { id: 12, label: '12. API Documentation', icon: iconMap.Code2 || <ArrowLeft size={15} /> },
+    { id: 13, label: '13. User Profile & Settings', icon: iconMap.UserCog || <ArrowLeft size={15} /> },
+    { id: 14, label: '14. Alerts & Notifications', icon: iconMap.Bell || <ArrowLeft size={15} /> },
+    { id: 15, label: '15. Mobile Responsive View', icon: iconMap.Smartphone || <ArrowLeft size={15} /> },
   ];
 
   const currentItem = menuItems.find((m) => m.id === activeScreen) || menuItems[1];

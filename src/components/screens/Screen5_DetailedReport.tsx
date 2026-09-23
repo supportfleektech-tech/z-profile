@@ -111,7 +111,7 @@ export const Screen5_DetailedReport: React.FC = () => {
               <div className="absolute inset-0 flex flex-col items-center justify-center">
                 <span className="text-2xl font-extrabold text-white font-mono">{score}%</span>
                 <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider">
-                  {profile.riskLevel} Risk
+                  {profile.trustLevel} Risk
                 </span>
               </div>
             </div>
@@ -213,3 +213,4 @@ export const Screen5_DetailedReport: React.FC = () => {
     </div>
   );
 };
+export default Screen5_DetailedReport;

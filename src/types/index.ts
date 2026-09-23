@@ -13,7 +13,7 @@ export interface IdentityProfile {
   avatarUrl?: string;
   isVerified: boolean;
   riskScore: number;
-  riskLevel: 'Low' | 'Medium' | 'High';
+  trustLevel: 'Low' | 'Medium' | 'High';
   providers: {
     kra: { verified: boolean; status: string; pin: string; taxCompliance: boolean };
     mpesa: { verified: boolean; status: string; accountName: string; activeSince: string };

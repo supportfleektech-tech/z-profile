@@ -1,68 +1,15 @@
 import React, { useState } from 'react';
 import { useAppRouter } from '../../context/RouterContext';
 import { platformRoutes, PageRoute } from '../../types/routes';
-import {
-  LogIn,
-  LayoutDashboard,
-  Search,
-  UserCheck,
-  FileBarChart2,
-  Briefcase,
-  BarChart3,
-  CreditCard,
-  Shield,
-  Server,
-  Layers,
-  Code2,
-  UserCog,
-  Bell,
-  Smartphone,
-  LayoutGrid,
-  ChevronRight,
-  ChevronDown,
-} from 'lucide-react';
+import { ChevronRight, ChevronDown } from 'lucide-react';
+import { iconMap } from '../../utils/iconRegistry';
 
 export const PageNavigator: React.FC = () => {
   const { currentPath, navigate } = useAppRouter();
   const [isOpen, setIsOpen] = useState(false);
 
   const getRouteIcon = (iconName: string) => {
-    switch (iconName) {
-      case 'LogIn':
-        return <LogIn size={13} />;
-      case 'LayoutDashboard':
-        return <LayoutDashboard size={13} />;
-      case 'Search':
-        return <Search size={13} />;
-      case 'UserCheck':
-        return <UserCheck size={13} />;
-      case 'FileBarChart2':
-        return <FileBarChart2 size={13} />;
-      case 'Briefcase':
-        return <Briefcase size={13} />;
-      case 'BarChart3':
-        return <BarChart3 size={13} />;
-      case 'CreditCard':
-        return <CreditCard size={13} />;
-      case 'Shield':
-        return <Shield size={13} />;
-      case 'Server':
-        return <Server size={13} />;
-      case 'Layers':
-        return <Layers size={13} />;
-      case 'Code2':
-        return <Code2 size={13} />;
-      case 'UserCog':
-        return <UserCog size={13} />;
-      case 'Bell':
-        return <Bell size={13} />;
-      case 'Smartphone':
-        return <Smartphone size={13} />;
-      case 'LayoutGrid':
-        return <LayoutGrid size={13} />;
-      default:
-        return <ChevronRight size={13} />;
-    }
+    return iconMap[iconName] || <ChevronRight size={13} />;
   };
 
   const currentRoute: PageRoute =
@@ -169,7 +116,7 @@ export const PageNavigator: React.FC = () => {
                 : 'bg-sky-950/80 hover:bg-sky-900/80 border border-sky-800 text-cyan-300'
             }`}
           >
-            <LayoutGrid size={12} />
+            {iconMap.LayoutGrid || <ChevronRight size={12} />}
             <span className="font-semibold">All-in-One Blueprint</span>
           </button>
         </div>

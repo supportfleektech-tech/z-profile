@@ -223,3 +223,4 @@ export const Screen8_Billing: React.FC = () => {
     </div>
   );
 };
+export default Screen8_Billing;

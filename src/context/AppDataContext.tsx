@@ -130,23 +130,28 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const pushToast = useCallback((t: Omit<ToastMessage, 'id'>) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setToasts((prev) => [...prev, { ...t, id }]);
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       setToasts((prev) => prev.filter((x) => x.id !== id));
     }, 4200);
+    return () => clearTimeout(timer);
   }, []);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((x) => x.id !== id));
   }, []);
 
-  const login = useCallback(async (email: string, _password: string) => {
-    await new Promise((r) => setTimeout(r, 700));
-    const user = users.find((u) => u.email === email) || initialUsers[0];
-    setCurrentUser(user);
-    setIsAuthenticated(true);
-    pushToast({ title: 'Welcome back', description: `Signed in as ${user.name}`, type: 'success' });
-    return true;
-  }, [users, pushToast]);
+const login = useCallback(async (email: string, _password: string) => {
+  await new Promise((r) => setTimeout(r, 700));
+  const user = users.find((u) => u.email === email) || initialUsers[0];
+  if (!user) {
+    pushToast({ title: 'Authentication failed', description: 'Invalid credentials', type: 'error' });
+    return false;
+  }
+  setCurrentUser(user);
+  setIsAuthenticated(true);
+  pushToast({ title: 'Welcome back', description: `Signed in as ${user.name}`, type: 'success' });
+  return true;
+}, [users, pushToast]);
 
   const logout = useCallback(() => {
     setIsAuthenticated(false);

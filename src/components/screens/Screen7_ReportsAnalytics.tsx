@@ -150,3 +150,4 @@ export const Screen7_ReportsAnalytics: React.FC = () => {
     </div>
   );
 };
+export default Screen7_ReportsAnalytics;

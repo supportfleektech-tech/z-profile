@@ -151,3 +151,4 @@ export const Screen14_AlertsNotifications: React.FC = () => {
     </div>
   );
 };
+export default Screen14_AlertsNotifications;

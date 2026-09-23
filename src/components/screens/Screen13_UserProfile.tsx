@@ -245,3 +245,4 @@ export const Screen13_UserProfile: React.FC = () => {
     </div>
   );
 };
+export default Screen13_UserProfile;

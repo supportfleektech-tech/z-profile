@@ -1,27 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, Suspense, lazy } from 'react';
 import { Maximize2, ExternalLink } from 'lucide-react';
-import { Screen1_Login } from '../screens/Screen1_Login';
-import { Screen2_Dashboard } from '../screens/Screen2_Dashboard';
-import { Screen3_NewSearch } from '../screens/Screen3_NewSearch';
-import { Screen4_IdentityProfile } from '../screens/Screen4_IdentityProfile';
-import { Screen5_DetailedReport } from '../screens/Screen5_DetailedReport';
-import { Screen6_Cases } from '../screens/Screen6_Cases';
-import { Screen7_ReportsAnalytics } from '../screens/Screen7_ReportsAnalytics';
-import { Screen8_Billing } from '../screens/Screen8_Billing';
-import { Screen9_AdminConsole } from '../screens/Screen9_AdminConsole';
-import { Screen10_ProviderManagement } from '../screens/Screen10_ProviderManagement';
-import { Screen11_PricingTiers } from '../screens/Screen11_PricingTiers';
-import { Screen12_ApiDocumentation } from '../screens/Screen12_ApiDocumentation';
-import { Screen13_UserProfile } from '../screens/Screen13_UserProfile';
-import { Screen14_AlertsNotifications } from '../screens/Screen14_AlertsNotifications';
-import { Screen15_MobileView } from '../screens/Screen15_MobileView';
-
 import { SystemArchitecture } from '../footer/SystemArchitecture';
 import { KeyFeatures } from '../footer/KeyFeatures';
 import { SecurityCompliance } from '../footer/SecurityCompliance';
 import { DeploymentCiCd } from '../footer/DeploymentCiCd';
 import { BrandFooter } from '../footer/BrandFooter';
 import { ScreenModal } from '../interactive/ScreenModal';
+
+const Screen1_Login = lazy(() => import('../screens/Screen1_Login'));
+const Screen2_Dashboard = lazy(() => import('../screens/Screen2_Dashboard'));
+const Screen3_NewSearch = lazy(() => import('../screens/Screen3_NewSearch'));
+const Screen4_IdentityProfile = lazy(() => import('../screens/Screen4_IdentityProfile'));
+const Screen5_DetailedReport = lazy(() => import('../screens/Screen5_DetailedReport'));
+const Screen6_Cases = lazy(() => import('../screens/Screen6_Cases'));
+const Screen7_ReportsAnalytics = lazy(() => import('../screens/Screen7_ReportsAnalytics'));
+const Screen8_Billing = lazy(() => import('../screens/Screen8_Billing'));
+const Screen9_AdminConsole = lazy(() => import('../screens/Screen9_AdminConsole'));
+const Screen10_ProviderManagement = lazy(() => import('../screens/Screen10_ProviderManagement'));
+const Screen11_PricingTiers = lazy(() => import('../screens/Screen11_PricingTiers'));
+const Screen12_ApiDocumentation = lazy(() => import('../screens/Screen12_ApiDocumentation'));
+const Screen13_UserProfile = lazy(() => import('../screens/Screen13_UserProfile'));
+const Screen14_AlertsNotifications = lazy(() => import('../screens/Screen14_AlertsNotifications'));
+const Screen15_MobileView = lazy(() => import('../screens/Screen15_MobileView'));
 
 interface BlueprintViewProps {
   onSwitchToInteractive: (screenId?: number) => void;
@@ -32,105 +32,54 @@ export const BlueprintView: React.FC<BlueprintViewProps> = ({
   onSwitchToInteractive,
   onOpenLiveSearch,
 }) => {
-  const [modalScreen, setModalScreen] = useState<{ id: number; title: string; component: React.ReactNode } | null>(null);
+  const [modalScreen, setModalScreen] = useState<{ id: number; title: string } | null>(null);
 
-  const screens = [
-    {
-      id: 1,
-      title: '1. Login Page',
-      component: <Screen1_Login onLoginSuccess={() => onSwitchToInteractive(2)} />,
-    },
-    {
-      id: 2,
-      title: '2. Dashboard (Overview)',
-      component: (
-        <Screen2_Dashboard
-          onNavigateToSearch={() => onSwitchToInteractive(3)}
-          onNavigateToCases={() => onSwitchToInteractive(6)}
-          onNavigateToProfile={() => onSwitchToInteractive(4)}
-        />
-      ),
-    },
-    {
-      id: 3,
-      title: '3. New Search / Investigation',
-      component: (
-        <Screen3_NewSearch
-          onExecuteSearch={() => onSwitchToInteractive(4)}
-        />
-      ),
-    },
-    {
-      id: 4,
-      title: '4. Identity Profile (Results)',
-      component: (
-        <Screen4_IdentityProfile
-          onViewDetailedReport={() => onSwitchToInteractive(5)}
-        />
-      ),
-    },
-    {
-      id: 5,
-      title: '5. Detailed Report View',
-      component: <Screen5_DetailedReport />,
-    },
-    {
-      id: 6,
-      title: '6. Cases / Investigations',
-      component: (
-        <Screen6_Cases
-          onSelectCase={() => onSwitchToInteractive(4)}
-        />
-      ),
-    },
-    {
-      id: 7,
-      title: '7. Reports & Analytics',
-      component: <Screen7_ReportsAnalytics />,
-    },
-    {
-      id: 8,
-      title: '8. Billing & Subscriptions',
-      component: <Screen8_Billing />,
-    },
-    {
-      id: 9,
-      title: '9. Admin Console',
-      component: <Screen9_AdminConsole />,
-    },
-    {
-      id: 10,
-      title: '10. Provider Management',
-      component: <Screen10_ProviderManagement />,
-    },
-    {
-      id: 11,
-      title: '11. Pricing & Tiers',
-      component: <Screen11_PricingTiers />,
-    },
-    {
-      id: 12,
-      title: '12. API Documentation',
-      component: <Screen12_ApiDocumentation />,
-    },
-    {
-      id: 13,
-      title: '13. User Profile & Settings',
-      component: <Screen13_UserProfile />,
-    },
-    {
-      id: 14,
-      title: '14. Alerts & Notifications',
-      component: <Screen14_AlertsNotifications />,
-    },
-    {
-      id: 15,
-      title: '15. Mobile Responsive View',
-      component: <Screen15_MobileView />,
-    },
-  ];
+  const screenComponents: Record<number, React.LazyExoticComponent<React.ComponentType<any>>> = {
+    1: Screen1_Login,
+    2: Screen2_Dashboard,
+    3: Screen3_NewSearch,
+    4: Screen4_IdentityProfile,
+    5: Screen5_DetailedReport,
+    6: Screen6_Cases,
+    7: Screen7_ReportsAnalytics,
+    8: Screen8_Billing,
+    9: Screen9_AdminConsole,
+    10: Screen10_ProviderManagement,
+    11: Screen11_PricingTiers,
+    12: Screen12_ApiDocumentation,
+    13: Screen13_UserProfile,
+    14: Screen14_AlertsNotifications,
+    15: Screen15_MobileView,
+  };
 
+  const ScreenWrapper: React.FC<{ id: number }> = ({ id }) => {
+  const Comp = screenComponents[id];
   return (
+    <Suspense fallback={<div className="w-full h-full flex items-center justify-center text-cyan-400 text-xs">Loading…</div>}>
+      <Comp />
+    </Suspense>
+  );
+};
+
+const screens = [
+  { id: 1, title: '1. Login Page' },
+  { id: 2, title: '2. Dashboard (Overview)' },
+  { id: 3, title: '3. New Search / Investigation' },
+  { id: 4, title: '4. Identity Profile (Results)' },
+  { id: 5, title: '5. Detailed Report View' },
+  { id: 6, title: '6. Cases / Investigations' },
+  { id: 7, title: '7. Reports & Analytics' },
+  { id: 8, title: '8. Billing & Subscriptions' },
+  { id: 9, title: '9. Admin Console' },
+  { id: 10, title: '10. Provider Management' },
+  { id: 11, title: '11. Pricing & Tiers' },
+  { id: 12, title: '12. API Documentation' },
+  { id: 13, title: '13. User Profile & Settings' },
+  { id: 14, title: '14. Alerts & Notifications' },
+  { id: 15, title: '15. Mobile Responsive View' },
+];
+
+return (
     <div className="w-full bg-[#050b14] bg-tech-grid text-slate-100 p-2 sm:p-4 lg:p-6 space-y-6">
       {/* Floating Quick Action Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-[#081527]/90 border border-sky-800/60 backdrop-blur-md shadow-lg">
@@ -157,40 +106,42 @@ export const BlueprintView: React.FC<BlueprintViewProps> = ({
         </div>
       </div>
 
-      {/* 15 Screens Grid: 5 columns on wide monitors, responsive on tablet/mobile */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3.5 sm:gap-4">
-        {screens.map((screen) => (
-          <div key={screen.id} className="flex flex-col space-y-1.5 group">
-            {/* Screen Title Label */}
-            <div className="flex items-center justify-between px-1">
-              <span className="text-[11px] sm:text-xs font-bold text-slate-200 tracking-tight group-hover:text-cyan-300 transition-colors">
-                {screen.title}
-              </span>
-              <div className="flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
-                <button
-                  onClick={() => setModalScreen(screen)}
-                  className="p-1 rounded bg-sky-950/70 hover:bg-sky-900 text-slate-300 hover:text-cyan-300 transition-colors cursor-pointer"
-                  title="Expand preview"
-                >
-                  <Maximize2 size={11} />
-                </button>
-                <button
-                  onClick={() => onSwitchToInteractive(screen.id)}
-                  className="p-1 rounded bg-sky-950/70 hover:bg-sky-900 text-slate-300 hover:text-cyan-300 transition-colors cursor-pointer"
-                  title="Open live app mode"
-                >
-                  <ExternalLink size={11} />
-                </button>
-              </div>
-            </div>
+{/* 15 Screens Grid: 5 columns on wide monitors, responsive on tablet/mobile */}
+        <Suspense fallback={<div className="w-full h-96 flex items-center justify-center text-cyan-400 text-sm">Loading modules…</div>}>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3.5 sm:gap-4">
+            {screens.map((screen) => (
+              <div key={screen.id} className="flex flex-col space-y-1.5 group">
+                {/* Screen Title Label */}
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-[11px] sm:text-xs font-bold text-slate-200 tracking-tight group-hover:text-cyan-300 transition-colors">
+                    {screen.title}
+                  </span>
+                  <div className="flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => setModalScreen({ id: screen.id, title: screen.title })}
+                      className="p-1 rounded bg-sky-950/70 hover:bg-sky-900 text-slate-300 hover:text-cyan-300 transition-colors cursor-pointer"
+                      title="Expand preview"
+                    >
+                      <Maximize2 size={11} />
+                    </button>
+                    <button
+                      onClick={() => onSwitchToInteractive(screen.id)}
+                      className="p-1 rounded bg-sky-950/70 hover:bg-sky-900 text-slate-300 hover:text-cyan-300 transition-colors cursor-pointer"
+                      title="Open live app mode"
+                    >
+                      <ExternalLink size={11} />
+                    </button>
+                  </div>
+                </div>
 
-            {/* Screen Card Container with interactive hover effect */}
-            <div className="w-full h-[375px] sm:h-[390px] rounded-xl overflow-hidden border border-sky-950/90 group-hover:border-cyan-500/50 group-hover:shadow-[0_0_20px_rgba(6,182,212,0.18)] transition-all bg-[#071120] relative">
-              {screen.component}
-            </div>
+                {/* Screen Card Container with interactive hover effect */}
+                <div className="w-full h-[375px] sm:h-[390px] rounded-xl overflow-hidden border border-sky-950/90 group-hover:border-cyan-500/50 group-hover:shadow-[0_0_20px_rgba(6,182,212,0.18)] transition-all bg-[#071120] relative">
+                  <ScreenWrapper id={screen.id} />
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </Suspense>
 
       {/* Bottom Technical Architecture & Platform Cards */}
       <div className="pt-2 space-y-4">
@@ -223,7 +174,12 @@ export const BlueprintView: React.FC<BlueprintViewProps> = ({
           screenNumber={modalScreen.id}
           onSwitchToInteractiveMode={() => onSwitchToInteractive(modalScreen.id)}
         >
-          {modalScreen.component}
+          <Suspense fallback={<div className="w-full h-full flex items-center justify-center text-cyan-400 text-xs">Loading…</div>}>
+            {(() => {
+              const Comp = screenComponents[modalScreen.id];
+              return <Comp />;
+            })()}
+          </Suspense>
         </ScreenModal>
       )}
     </div>

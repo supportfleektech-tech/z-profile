@@ -13,7 +13,7 @@ export const primaryProfile: IdentityProfile = {
   avatarUrl: '/images/avatar-john.jpg',
   isVerified: true,
   riskScore: 92,
-  riskLevel: 'Low',
+  trustLevel: 'High',
   providers: {
     kra: { verified: true, status: 'Verified', pin: 'A123456789K', taxCompliance: true },
     mpesa: { verified: true, status: 'Verified', accountName: 'JOHN MWANGI KAMAU', activeSince: '2012' },

@@ -1,28 +1,9 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import {
-  Search,
-  X,
-  LogIn,
-  LayoutDashboard,
-  UserCheck,
-  FileBarChart2,
-  Briefcase,
-  BarChart3,
-  CreditCard,
-  Shield,
-  Server,
-  Layers,
-  Code2,
-  UserCog,
-  Bell,
-  Smartphone,
-  LayoutGrid,
-  Sparkles,
-  ArrowRight,
-} from 'lucide-react';
+import { X, ArrowRight } from 'lucide-react';
 import { useAppRouter } from '../../context/RouterContext';
 import { useAppData } from '../../context/AppDataContext';
 import { platformRoutes } from '../../types/routes';
+import { iconMap } from '../../utils/iconRegistry';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -49,25 +30,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     }
   }, [isOpen]);
 
-  const iconMap: Record<string, React.ReactNode> = {
-    LogIn: <LogIn size={15} />,
-    LayoutDashboard: <LayoutDashboard size={15} />,
-    Search: <Search size={15} />,
-    UserCheck: <UserCheck size={15} />,
-    FileBarChart2: <FileBarChart2 size={15} />,
-    Briefcase: <Briefcase size={15} />,
-    BarChart3: <BarChart3 size={15} />,
-    CreditCard: <CreditCard size={15} />,
-    Shield: <Shield size={15} />,
-    Server: <Server size={15} />,
-    Layers: <Layers size={15} />,
-    Code2: <Code2 size={15} />,
-    UserCog: <UserCog size={15} />,
-    Bell: <Bell size={15} />,
-    Smartphone: <Smartphone size={15} />,
-    LayoutGrid: <LayoutGrid size={15} />,
-  };
-
   const actions = useMemo(() => {
     const pageActions = platformRoutes.map((r) => ({
       id: r.id,
@@ -84,7 +46,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         label: 'Run Live Citizen ID Verification',
         description: 'Cross-registry instant lookup via Spin Mobile',
         path: '',
-        icon: <Sparkles size={15} />,
+        icon: iconMap.Sparkles || <ArrowRight size={15} />,
         type: 'action' as const,
       },
     ];
@@ -151,7 +113,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       >
         {/* Search input */}
         <div className="flex items-center gap-3 px-4 py-3.5 border-b border-sky-900/60">
-          <Search size={18} className="text-cyan-400 shrink-0" />
+          {iconMap.Search || <ArrowRight size={18} className="text-cyan-400 shrink-0" />}
           <input
             ref={inputRef}
             type="text"

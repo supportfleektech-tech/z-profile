@@ -259,3 +259,4 @@ export const Screen9_AdminConsole: React.FC = () => {
     </div>
   );
 };
+export default Screen9_AdminConsole;

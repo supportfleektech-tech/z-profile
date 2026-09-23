@@ -299,3 +299,4 @@ export const Screen2_Dashboard: React.FC<Screen2DashboardProps> = ({
     </div>
   );
 };
+export default Screen2_Dashboard;

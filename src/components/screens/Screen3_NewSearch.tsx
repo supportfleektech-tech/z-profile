@@ -303,3 +303,4 @@ export const Screen3_NewSearch: React.FC<Screen3NewSearchProps> = ({ onExecuteSe
     </div>
   );
 };
+export default Screen3_NewSearch;

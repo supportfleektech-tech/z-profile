@@ -191,3 +191,4 @@ export const Screen15_MobileView: React.FC = () => {
     </div>
   );
 };
+export default Screen15_MobileView;
