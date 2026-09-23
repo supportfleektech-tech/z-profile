@@ -27,3 +27,6 @@ server/.data/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# Smoke-test artifacts
+.smoke-artifacts/
