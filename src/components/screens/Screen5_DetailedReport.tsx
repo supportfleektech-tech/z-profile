@@ -1,216 +1,558 @@
-import React, { useState } from 'react';
-import { Download, CheckCircle2, ChevronRight, ShieldCheck, Printer } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import {
+  FileBarChart2, Printer, Download, Eye, EyeOff, ShieldCheck, AlertTriangle, CheckCircle2, ScrollText,
+  Network, Landmark, Zap, Briefcase, Building2, UserCheck, Gauge, Layers, FileText, Table2,
+} from 'lucide-react';
 import { useAppData } from '../../context/AppDataContext';
+import { Badge, Button, Callout, EmptyState, Panel, ProgressBar, ResponsiveTable, SegmentedControl } from '../ui';
+import { buildFullReportPdf, buildSummaryPdf } from '../../lib/reports';
+import { downloadBlob, downloadText, formatDate, KES, maskPii, toCsv } from '../../lib/format';
+import type { DossierSection, ExtractedField, VerificationState } from '../../types';
 
+type View = 'Summary' | 'Full Report';
+
+const tone = (s: VerificationState): 'success' | 'warning' | 'danger' | 'info' | 'neutral' =>
+  s === 'verified' ? 'success' : s === 'partial' ? 'warning' : s === 'not_found' ? 'neutral' : s === 'mismatch' ? 'danger' : 'info';
+const label = (s: VerificationState): string =>
+  s === 'verified' ? 'Verified' : s === 'partial' ? 'Partial' : s === 'not_found' ? 'Not found' : s === 'mismatch' ? 'Mismatch' : 'Insufficient';
+
+const SECTION_ICON: Record<string, React.ReactNode> = {
+  'sec-civil': <UserCheck size={13} className="text-cyan-400" />,
+  'sec-kra': <Landmark size={13} className="text-emerald-400" />,
+  'sec-mpesa': <Zap size={13} className="text-emerald-400" />,
+  'sec-crb': <Gauge size={13} className="text-cyan-400" />,
+  'sec-employer': <Briefcase size={13} className="text-blue-400" />,
+  'sec-utility': <Zap size={13} className="text-amber-400" />,
+  'sec-business': <Building2 size={13} className="text-violet-400" />,
+  'sec-connections': <Network size={13} className="text-pink-400" />,
+  'sec-screening': <ShieldCheck size={13} className="text-amber-400" />,
+  'sec-criminal': <AlertTriangle size={13} className="text-rose-400" />,
+  'sec-financial': <Landmark size={13} className="text-emerald-400" />,
+  'sec-risk': <Gauge size={13} className="text-cyan-400" />,
+};
+
+/** One extracted field rendered with its provenance. */
+const FieldRow: React.FC<{ f: ExtractedField; masked: boolean; mask: (v: string) => string }> = ({ f, masked, mask }) => {
+  const raw = f.value === null || f.value === undefined || f.value === '' ? '—' : String(f.value);
+  const shown = masked && typeof f.value === 'string' && f.masked !== false ? mask(raw) : raw;
+  return (
+    <tr className="border-b border-sky-950/60 last:border-0 align-top">
+      <td className="py-1.5 pr-2 text-[10px] text-slate-500 w-[38%] sm:w-[30%]">{f.label}</td>
+      <td className="py-1.5 pr-2 text-[11px] text-slate-100 font-mono break-all">{shown}</td>
+      <td className="py-1.5 pr-2 text-[10px] text-slate-500 hidden sm:table-cell">{f.source ?? '—'}</td>
+      <td className="py-1.5 pr-2 hidden lg:table-cell">
+        {f.confidence != null ? (
+          <span className="flex items-center gap-1.5 min-w-[86px]">
+            <ProgressBar value={f.confidence} max={100} height={4} className="flex-1" />
+            <span className="text-[9px] font-mono text-slate-400 w-7 text-right">{f.confidence}%</span>
+          </span>
+        ) : (
+          <span className="text-[10px] text-slate-600">—</span>
+        )}
+      </td>
+      <td className="py-1.5 text-[9px] text-slate-600 hidden xl:table-cell font-mono">{f.matchRule ?? '—'}</td>
+    </tr>
+  );
+};
+
+/**
+ * Detailed Report.
+ *
+ * The two views are deliberately different: **Summary** is a one-page executive brief,
+ * **Full Report** renders every field extracted from every gateway, with provenance,
+ * confidence, match rule and the masked raw payload. Print and PDF both emit the FULL
+ * dataset regardless of which view is on screen.
+ */
 export const Screen5_DetailedReport: React.FC = () => {
-  const { activeProfile, pushToast } = useAppData();
-  const [reportTab, setReportTab] = useState<'Summary' | 'Full Report'>('Summary');
-  const [selectedSection, setSelectedSection] = useState('Personal Details');
-  const [downloading, setDownloading] = useState(false);
+  const { activeDossier: d, settings, can, pushToast, currentUser } = useAppData();
+  const [view, setView] = useState<View>('Summary');
+  const [masked, setMasked] = useState(true);
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+  const [busy, setBusy] = useState(false);
 
-  const profile = activeProfile;
-  const score = profile.riskScore;
-  const circumference = 2 * Math.PI * 40;
-  const offset = circumference * (1 - score / 100);
+  const mask = (v: string) => maskPii(v, masked ? 'partial' : 'none');
 
-  const sections = [
-    'Personal Details',
-    'KRA Records',
-    'M-PESA KYC',
-    'CRB Records',
-    'Employer Verification',
-    'KPLC Records',
-    'Connections',
-    'Financial Analysis',
-  ];
+  const totalCost = d.sections.reduce((a, s) => a + s.costKes, 0);
+  const totalFields = d.sections.reduce((a, s) => a + s.fields.length, 0);
+  const avgConfidence = Math.round(d.sections.reduce((a, s) => a + s.confidence, 0) / Math.max(1, d.sections.length));
+  const verifiedCount = d.sections.filter((s) => s.state === 'verified').length;
 
-  const handleDownload = () => {
-    setDownloading(true);
-    setTimeout(() => {
-      setDownloading(false);
+  const keyFindings = useMemo(() => {
+    const out: { level: 'danger' | 'warning' | 'success'; text: string }[] = [];
+    if (d.subject.deceased) out.push({ level: 'danger', text: 'Registry marks this identity as deceased.' });
+    if (d.screening.pep) out.push({ level: 'warning', text: `Politically exposed person — ${d.screening.pepDetail}` });
+    if (d.screening.sanctions) out.push({ level: 'danger', text: `Sanctions / watchlist match — ${d.screening.sanctionsDetail}` });
+    d.screening.criminalRecords.forEach((c) => out.push({ level: 'warning', text: `Criminal record ${c.caseNo} (${c.court}) — ${c.charge}; outcome: ${c.outcome}` }));
+    d.credit.adverseListings.forEach((a) => out.push({ level: 'danger', text: `Adverse listing: ${a.institution} — ${a.type}, ${KES(a.amountKes, { decimals: false })}` }));
+    if (d.tax.outstandingKes > 0) out.push({ level: 'warning', text: `Outstanding KRA liability of ${KES(d.tax.outstandingKes, { decimals: false })}.` });
+    if (!d.tax.goodStanding) out.push({ level: 'warning', text: 'KRA tax compliance certificate is not in good standing.' });
+    if (d.utility.arrearsKes > 0) out.push({ level: 'warning', text: `Utility arrears of ${KES(d.utility.arrearsKes, { decimals: false })} at ${d.utility.provider}.` });
+    if (d.credit.utilisationPct > 80) out.push({ level: 'warning', text: `Credit utilisation is high at ${d.credit.utilisationPct}%.` });
+    if (d.mobileMoney.simSwapEvents > 0) out.push({ level: 'warning', text: `${d.mobileMoney.simSwapEvents} SIM swap event(s) on the M-PESA line.` });
+    d.documents.filter((x) => x.status === 'Expired').forEach((x) => out.push({ level: 'warning', text: `${x.type} expired on ${x.expiresOn ?? 'unknown date'}.` }));
+    if (out.length === 0) out.push({ level: 'success', text: 'No adverse findings across any queried source.' });
+    return out;
+  }, [d]);
+
+  const toggleSection = (id: string) => setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
+  const expandAll = () => setOpenSections(Object.fromEntries(d.sections.map((s) => [s.id, true])));
+  const collapseAll = () => setOpenSections({});
+
+  const doPrint = () => {
+    pushToast({ title: 'Sending full report to print', description: `${d.sections.length} sections · ${totalFields} fields · ${d.events.length} events`, type: 'info' });
+    setTimeout(() => window.print(), 220);
+  };
+
+  const doDownload = async (kind: 'full' | 'summary') => {
+    if (!can('report.export')) {
+      pushToast({ title: 'Export blocked', description: 'Your role does not include report.export', type: 'error' });
+      return;
+    }
+    setBusy(true);
+    try {
+      const doc = kind === 'full' ? buildFullReportPdf(d, settings, { maskPii: masked }) : buildSummaryPdf(d, settings);
+      const blob = doc.toBlob();
+      const name = kind === 'full' ? `IPRS_${d.subject.idNumber}_FULL_${d.reportId}.pdf` : `IPRS_${d.subject.idNumber}_SUMMARY_${d.reportId}.pdf`;
+      downloadBlob(blob, name);
       pushToast({
-        title: 'Report downloaded',
-        description: `IPRS-R-2026-${profile.idNumber}.pdf ready`,
+        title: 'PDF downloaded',
+        description: `${name} · ${(blob.size / 1024).toFixed(1)} KB`,
         type: 'success',
       });
-    }, 1100);
+    } catch (err) {
+      pushToast({ title: 'PDF generation failed', description: String(err), type: 'error' });
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const handlePrint = () => {
-    pushToast({ title: 'Opening print dialog', description: 'Optimized report layout', type: 'info' });
-    setTimeout(() => window.print(), 300);
+  const doExportFields = () => {
+    const rows = d.sections.flatMap((s) =>
+      s.fields.map((f) => ({
+        reportId: d.reportId,
+        section: s.title,
+        provider: s.provider,
+        field: f.label,
+        value: masked && typeof f.value === 'string' && f.masked !== false ? mask(f.value) : String(f.value ?? ''),
+        source: f.source ?? '',
+        confidence: f.confidence ?? '',
+        matchRule: f.matchRule ?? '',
+        retrievedAt: f.retrievedAt ?? s.retrievedAt,
+      }))
+    );
+    downloadText(toCsv(rows), `${d.reportId}_fields.csv`, 'text/csv;charset=utf-8');
+    pushToast({ title: 'Field export ready', description: `${rows.length} fields written to CSV`, type: 'success' });
   };
+
 
   return (
-    <div className="w-full h-full min-h-[420px] bg-[#071120] text-slate-100 rounded-xl overflow-hidden border border-sky-900/40 flex flex-col text-xs">
-      <div className="px-3 sm:px-4 py-2.5 bg-[#091629] border-b border-sky-900/40 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <ShieldCheck size={16} className="text-cyan-400 shrink-0" />
-          <h2 className="text-xs sm:text-sm font-bold text-white tracking-tight truncate">
-            Identity Report <span className="text-slate-400 font-normal">| {profile.fullName}</span>
-          </h2>
+    <div className="w-full text-xs text-slate-200">
+      {/* -------- toolbar -------- */}
+      <div className="sticky top-0 z-20 bg-[#071120]/97 backdrop-blur border-b border-sky-900/50 px-2 sm:px-4 py-2.5 flex flex-col lg:flex-row lg:items-center gap-2.5 no-print">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <FileBarChart2 size={16} className="text-cyan-400 shrink-0" />
+          <div className="min-w-0">
+            <h2 className="text-xs sm:text-sm font-bold text-white truncate">
+              {view === 'Summary' ? 'Executive summary' : 'Complete verification report'}
+            </h2>
+            <p className="text-[10px] text-slate-500 truncate font-mono">
+              {d.reportId} · {d.subject.fullName} · generated {formatDate(d.generatedAt, true)}
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center bg-[#050b14] p-0.5 rounded-lg border border-sky-900/60 text-[10px]">
-            {(['Summary', 'Full Report'] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setReportTab(t)}
-                className={`px-2.5 py-1 rounded-md transition-all ${
-                  reportTab === t ? 'bg-cyan-600 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-
-          <button
-            onClick={handlePrint}
-            className="p-1.5 rounded-lg border border-sky-800 text-slate-400 hover:text-white hover:bg-sky-950 transition-colors no-print"
-            title="Print"
-          >
-            <Printer size={14} />
-          </button>
-
-          <button
-            onClick={handleDownload}
-            disabled={downloading}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-[10px] shadow-[0_0_10px_rgba(2,132,199,0.4)] transition-all active:scale-95 disabled:opacity-60 no-print"
-          >
-            {downloading ? (
-              <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            ) : (
-              <Download size={11} />
-            )}
-            <span>Download PDF</span>
-          </button>
+        <div className="flex flex-wrap items-center gap-2 justify-end">
+          <SegmentedControl
+            options={[
+              { value: 'Summary', label: 'Summary' },
+              { value: 'Full Report', label: `Full Report · ${totalFields} fields` },
+            ]}
+            value={view}
+            onChange={(v) => setView(v as View)}
+            size="sm"
+          />
+          {view === 'Full Report' && (
+            <>
+              <Button size="xs" variant="ghost" onClick={expandAll}>Expand all</Button>
+              <Button size="xs" variant="ghost" onClick={collapseAll}>Collapse</Button>
+            </>
+          )}
+          <Button size="xs" variant="secondary" icon={masked ? <Eye size={12} /> : <EyeOff size={12} />} onClick={() => setMasked((v) => !v)}>
+            {masked ? 'Unmask' : 'Mask'}
+          </Button>
+          <Button size="xs" variant="secondary" icon={<Table2 size={12} />} onClick={doExportFields} disabled={!can('report.export')}>
+            CSV
+          </Button>
+          <Button size="xs" variant="secondary" icon={<Printer size={12} />} onClick={doPrint}>
+            Print
+          </Button>
+          <Button size="xs" variant="secondary" loading={busy} icon={<Download size={12} />} onClick={() => doDownload('summary')} disabled={!can('report.export')}>
+            Summary PDF
+          </Button>
+          <Button size="xs" variant="primary" loading={busy} icon={<Download size={12} />} onClick={() => doDownload('full')} disabled={!can('report.export')}>
+            Download PDF
+          </Button>
         </div>
       </div>
 
-      <div className="flex-1 p-3 sm:p-4 grid grid-cols-1 md:grid-cols-12 gap-3 overflow-y-auto">
-        <div className="md:col-span-8 space-y-3">
-          <div className="bg-[#091629] p-4 rounded-xl border border-sky-900/40 flex flex-col sm:flex-row items-center gap-4">
-            <div className="relative w-28 h-28 shrink-0 flex items-center justify-center">
-              <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                <circle cx="50" cy="50" r="40" stroke="#0f2238" strokeWidth="8" fill="none" />
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="40"
-                  stroke="#10b981"
-                  strokeWidth="8"
-                  strokeDasharray={circumference}
-                  strokeDashoffset={offset}
-                  strokeLinecap="round"
-                  fill="none"
-                  className="drop-shadow-[0_0_8px_rgba(16,185,129,0.5)] transition-all duration-1000"
+      <div className="p-2 sm:p-4 space-y-4">
+        {view === 'Summary' ? (
+          /* =============================== SUMMARY =============================== */
+          <>
+            <Callout tone="info" title="Summary ≠ Full Report">
+              This is the one-page executive brief. Switch to <strong>Full Report</strong> above to see every field extracted from
+              every gateway — {d.sections.length} sources, {totalFields} fields and {d.events.length} verification events. Print and
+              PDF always emit the complete dataset.
+            </Callout>
+
+            <div className="grid gap-4 lg:grid-cols-3">
+              <Panel title="Subject" icon={<UserCheck size={14} className="text-cyan-400" />}>
+                <div className="space-y-2 text-[11px]">
+                  <div className="text-base font-black text-white">{d.subject.fullName}</div>
+                  {[
+                    ['National ID', masked ? mask(d.subject.idNumber) : d.subject.idNumber],
+                    ['Date of birth', `${d.subject.dob} (${d.subject.gender})`],
+                    ['KRA PIN', masked ? mask(d.subject.kraPin) : d.subject.kraPin],
+                    ['Phone', masked ? mask(d.subject.phone) : d.subject.phone],
+                    ['County', `${d.subject.county} · ${d.subject.subCounty}`],
+                    ['Employer', d.employment.find((e) => e.current)?.company ?? '—'],
+                    ['M-PESA name', masked ? mask(d.mobileMoney.accountName) : d.mobileMoney.accountName],
+                  ].map(([k, v]) => (
+                    <div key={k} className="flex items-baseline justify-between gap-2 border-b border-sky-950/60 pb-1.5 last:border-0">
+                      <span className="text-slate-500 shrink-0">{k}</span>
+                      <span className="text-slate-100 font-mono text-right break-all">{v}</span>
+                    </div>
+                  ))}
+                </div>
+              </Panel>
+
+              <Panel title="Risk verdict" icon={<ShieldCheck size={14} className="text-cyan-400" />}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-14 h-14 rounded-xl flex flex-col items-center justify-center border ${
+                    d.risk.band === 'Low' ? 'bg-emerald-950/50 border-emerald-800/50' : d.risk.band === 'Medium' ? 'bg-amber-950/50 border-amber-800/50' : 'bg-rose-950/50 border-rose-800/50'
+                  }`}>
+                    <span className="text-lg font-black text-white">{d.risk.score}</span>
+                    <span className="text-[8px] uppercase text-slate-400">{d.risk.band}</span>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-slate-300 leading-snug">{d.risk.verdict}</p>
+                    <p className="text-[10px] text-slate-500 mt-1">{d.risk.recommendation}</p>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-1.5">
+                  {d.risk.drivers.slice(0, 5).map((dr) => (
+                    <div key={dr.factor} className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 w-28 truncate">{dr.factor}</span>
+                      <div className="flex-1 h-1.5 rounded-full bg-[#0b1c33] overflow-hidden">
+                        <div className={`h-full ${dr.direction === 'positive' ? 'bg-emerald-500' : 'bg-rose-500'}`} style={{ width: `${Math.min(100, Math.abs(dr.contribution) * 6)}%` }} />
+                      </div>
+                      <span className={`text-[9px] font-mono w-8 text-right ${dr.direction === 'positive' ? 'text-emerald-400' : 'text-rose-400'}`}>{dr.contribution}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                  {[
+                    ['Sections', `${verifiedCount}/${d.sections.length}`],
+                    ['Confidence', `${avgConfidence}%`],
+                    ['Cost', KES(totalCost, { decimals: false })],
+                  ].map(([k, v]) => (
+                    <div key={k} className="rounded-lg bg-[#061020] border border-sky-900/50 py-1.5">
+                      <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">{k}</div>
+                      <div className="text-[11px] font-bold text-white font-mono">{v}</div>
+                    </div>
+                  ))}
+                </div>
+              </Panel>
+
+              <Panel title="Key findings" icon={<AlertTriangle size={14} className="text-amber-400" />}>
+                <div className="space-y-1.5 max-h-[300px] overflow-y-auto pr-1">
+                  {keyFindings.map((f, i) => (
+                    <div key={i} className={`flex items-start gap-2 rounded-lg border px-2.5 py-1.5 ${
+                      f.level === 'danger' ? 'border-rose-900/50 bg-rose-950/20' : f.level === 'warning' ? 'border-amber-900/50 bg-amber-950/20' : 'border-emerald-900/50 bg-emerald-950/20'
+                    }`}>
+                      {f.level === 'success' ? <CheckCircle2 size={12} className="text-emerald-400 mt-0.5 shrink-0" /> : <AlertTriangle size={12} className={f.level === 'danger' ? 'text-rose-400 mt-0.5 shrink-0' : 'text-amber-400 mt-0.5 shrink-0'} />}
+                      <span className="text-[11px] text-slate-300 leading-snug">{f.text}</span>
+                    </div>
+                  ))}
+                </div>
+              </Panel>
+            </div>
+
+            <Panel title="Financial snapshot" icon={<Landmark size={14} className="text-emerald-400" />}>
+              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
+                {[
+                  ['Credit score', `${d.credit.score}`, d.credit.scoreBand],
+                  ['Outstanding credit', KES(d.credit.totalOutstandingKes, { decimals: false }), `${d.credit.totalFacilities} facilities`],
+                  ['Utilisation', `${d.credit.utilisationPct}%`, `${d.credit.enquiries12m} enquiries/12m`],
+                  ['KRA outstanding', KES(d.tax.outstandingKes, { decimals: false }), d.tax.goodStanding ? 'good standing' : 'not compliant'],
+                  ['M-PESA turnover', KES(d.mobileMoney.avgMonthlyTurnoverKes, { decimals: false }), d.mobileMoney.activityBand],
+                  ['Utility bill', KES(d.utility.avgMonthlyBillKes, { decimals: false }), d.utility.paymentBehaviour],
+                ].map(([k, v, s]) => (
+                  <div key={k} className="rounded-lg bg-[#061020] border border-sky-900/50 px-2.5 py-2">
+                    <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold truncate">{k}</div>
+                    <div className="text-sm font-black text-white font-mono truncate">{v}</div>
+                    <div className="text-[9px] text-slate-500 truncate">{s}</div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+
+            <Panel title="Sources queried" icon={<Network size={14} className="text-cyan-400" />}>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {d.sections.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => { setView('Full Report'); setOpenSections((p) => ({ ...p, [s.id]: true })); }}
+                    className="text-left rounded-lg border border-sky-900/50 bg-[#061020] hover:border-cyan-800/60 hover:bg-sky-950/40 transition-colors px-2.5 py-2"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      {SECTION_ICON[s.id] ?? <Layers size={13} className="text-slate-500" />}
+                      <span className="text-[11px] font-semibold text-white truncate flex-1">{s.title}</span>
+                      <Badge tone={tone(s.state)}>{label(s.state)}</Badge>
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 text-[9px] text-slate-500">
+                      <span className="truncate">{s.provider}</span>
+                      <span className="ml-auto font-mono shrink-0">{s.fields.length} fields · {s.latencyMs}ms</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </Panel>
+          </>
+        ) : (
+          /* ============================= FULL REPORT ============================= */
+          <>
+            <Callout tone="accent" title={`Complete extracted dataset — ${d.sections.length} sources, ${totalFields} fields`}>
+              Nothing is aggregated or hidden here. Every field carries its source, retrieval time, confidence and match rule, and
+              every gateway response is available (masked unless you unmask PII). This is exactly what prints and what the PDF
+              contains.
+            </Callout>
+
+            {/* Cover block */}
+            <Panel title="Report identification" icon={<FileText size={14} className="text-cyan-400" />}>
+              <div className="grid gap-x-4 gap-y-2.5 grid-cols-2 sm:grid-cols-3 xl:grid-cols-4">
+                {[
+                  ['Report ID', d.reportId],
+                  ['Dossier ID', d.id],
+                  ['Generated at', formatDate(d.generatedAt, true)],
+                  ['Prepared by', `${d.attestation.preparedBy} (${d.attestation.preparedByTier})`],
+                  ['Classification', d.attestation.classification],
+                  ['Retention expiry', formatDate(d.attestation.retentionExpiry)],
+                  ['Framework', settings.compliance.framework],
+                  ['Consent model', settings.compliance.consentCapture],
+                  ['Total query cost', KES(totalCost)],
+                  ['Average confidence', `${avgConfidence}%`],
+                  ['Sections verified', `${verifiedCount} / ${d.sections.length}`],
+                  ['Events logged', String(d.events.length)],
+                ].map(([k, v]) => (
+                  <div key={k} className="min-w-0">
+                    <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">{k}</div>
+                    <div className="text-[11px] text-slate-100 mt-0.5 break-words">{v}</div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+
+            {/* Every section, every field */}
+            {d.sections.map((sec: DossierSection) => {
+              const open = openSections[sec.id] ?? true;
+              return (
+                <Panel
+                  key={sec.id}
+                  title={
+                    <span className="flex items-center gap-2 min-w-0">
+                      {SECTION_ICON[sec.id] ?? <Layers size={13} className="text-slate-500" />}
+                      <span className="truncate">{sec.title}</span>
+                      <Badge tone={tone(sec.state)}>{label(sec.state)}</Badge>
+                    </span>
+                  }
+                  subtitle={
+                    <span className="font-mono text-[10px]">
+                      {sec.provider} · {sec.fields.length} fields · {sec.confidence}% confidence · {sec.latencyMs} ms ·{' '}
+                      {KES(sec.costKes)} · {formatDate(sec.retrievedAt, true)}
+                    </span>
+                  }
+                  actions={
+                    <Button size="xs" variant="ghost" onClick={() => toggleSection(sec.id)}>
+                      {open ? 'Collapse' : 'Expand'}
+                    </Button>
+                  }
+                >
+                  {open && (
+                    <div className="space-y-3">
+                      <p className="text-[11px] text-slate-400 leading-relaxed">{sec.summary}</p>
+
+                      {sec.flags && sec.flags.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {sec.flags.map((f, i) => (
+                            <Badge key={i} tone={f.level === 'danger' ? 'danger' : f.level === 'warning' ? 'warning' : 'info'}>
+                              {f.text}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="overflow-x-auto rounded-lg border border-sky-900/50 bg-[#050b14]">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="bg-[#08172b] text-[9px] uppercase tracking-wider text-slate-500">
+                              <th className="text-left px-2 py-1.5 font-bold">Field</th>
+                              <th className="text-left px-2 py-1.5 font-bold">Extracted value</th>
+                              <th className="text-left px-2 py-1.5 font-bold hidden sm:table-cell">Source</th>
+                              <th className="text-left px-2 py-1.5 font-bold hidden lg:table-cell">Confidence</th>
+                              <th className="text-left px-2 py-1.5 font-bold hidden xl:table-cell">Match rule</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sec.fields.map((f, i) => (
+                              <FieldRow key={`${sec.id}-${i}`} f={f} masked={masked} mask={mask} />
+                            ))}
+                            {sec.fields.length === 0 && (
+                              <tr>
+                                <td colSpan={5} className="p-3 text-center text-[10px] text-slate-600">No fields extracted from this source.</td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {sec.rawResponse && (
+                        <details className="rounded-lg border border-sky-900/50 bg-[#050b14] overflow-hidden">
+                          <summary className="cursor-pointer px-2.5 py-2 text-[10px] font-semibold text-slate-400 hover:bg-sky-950/40 flex items-center gap-1.5">
+                            <ScrollText size={11} /> Raw gateway response ({Object.keys(sec.rawResponse).length} keys)
+                          </summary>
+                          <pre className="px-2.5 pb-2.5 text-[10px] font-mono text-emerald-300/80 overflow-x-auto whitespace-pre-wrap break-all">
+                            {JSON.stringify(
+                              Object.fromEntries(Object.entries(sec.rawResponse).map(([k, v]) => [k, masked && typeof v === 'string' && v.length > 4 ? mask(v) : v])),
+                              null,
+                              2
+                            )}
+                          </pre>
+                        </details>
+                      )}
+                    </div>
+                  )}
+                </Panel>
+              );
+            })}
+
+            {/* Consolidated records */}
+            <Panel title="Appendix — consolidated records" subtitle="All structured collections returned by the sources" icon={<Layers size={14} className="text-cyan-400" />}>
+              <div className="space-y-4">
+                <SubTable title={`Addresses (${d.addresses.length})`} headers={['Type', 'Address', 'City', 'County', 'Postal', 'Since', 'Confirmed by', 'Current']}
+                  rows={d.addresses.map((r) => [r.type, r.line, r.city, r.county, r.postalCode ?? '—', r.since ?? '—', r.confirmedBy ?? '—', r.current ? 'Yes' : 'No'])} />
+
+                <SubTable title={`Documents (${d.documents.length})`} headers={['Type', 'Number', 'Issued by', 'Issued', 'Expires', 'Status']}
+                  rows={d.documents.map((r) => [r.type, masked ? mask(r.number) : r.number, r.issuedBy, r.issuedOn, r.expiresOn ?? '—', r.status])} />
+
+                <SubTable title={`Employment (${d.employment.length})`} headers={['Employer', 'Position', 'Start', 'End', 'Band', 'Contract', 'Verified by', 'State']}
+                  rows={d.employment.map((r) => [r.company, r.position, r.startDate, r.endDate ?? 'Present', r.monthlyBand ?? '—', r.contractType ?? '—', r.verifiedBy, label(r.verificationState)])} />
+
+                <SubTable title={`KRA compliance years (${d.tax.complianceYears.length})`} headers={['Year', 'Return filed', 'Paid', 'Outstanding']}
+                  rows={d.tax.complianceYears.map((y) => [y.year, y.returnsFiled ? 'Yes' : 'No', y.paid ? 'Yes' : 'No', KES(y.outstandingKes)])} />
+
+                <SubTable title={`Credit facilities (${d.credit.facilities.length})`} headers={['Institution', 'Type', 'Opened', 'Limit', 'Outstanding', 'Arrears', 'Status']}
+                  rows={d.credit.facilities.map((f) => [f.institution, f.type, f.openedOn, KES(f.limit, { decimals: false }), KES(f.outstanding, { decimals: false }), KES(f.arrears, { decimals: false }), f.status])} />
+
+                <SubTable title={`Adverse listings (${d.credit.adverseListings.length})`} headers={['Institution', 'Type', 'Amount', 'Listed on']}
+                  rows={d.credit.adverseListings.map((a) => [a.institution, a.type, KES(a.amountKes, { decimals: false }), a.listedOn])} />
+
+                <SubTable title={`Business links (${d.business.links.length})`} headers={['Company', 'Registration', 'Role', 'Shareholding', 'Incorporated', 'Status', 'Source']}
+                  rows={d.business.links.map((b) => [b.companyName, b.registrationNo, b.role, b.shareholdingPct != null ? `${b.shareholdingPct}%` : '—', b.incorporatedOn ?? '—', b.status, b.verifiedBy])} />
+
+                <SubTable title={`Criminal records (${d.screening.criminalRecords.length})`} headers={['Case no.', 'Court', 'Charge', 'Filed', 'Outcome']}
+                  rows={d.screening.criminalRecords.map((c) => [c.caseNo, c.court, c.charge, c.filedOn, c.outcome])} />
+
+                <SubTable title={`Relationships (${d.relationships.length})`} headers={['Name', 'Relation', 'Link type', 'Strength', 'Evidence', 'PEP', 'Sanctioned']}
+                  rows={d.relationships.map((r) => [r.name, r.relation, r.linkType, r.strength, r.evidence, r.pep ? 'Yes' : 'No', r.sanctioned ? 'Yes' : 'No'])} />
+
+                <SubTable title={`Risk drivers (${d.risk.drivers.length})`} headers={['Factor', 'Weight', 'Contribution', 'Direction']}
+                  rows={d.risk.drivers.map((dr) => [dr.factor, String(dr.weight), String(dr.contribution), dr.direction])} />
+              </div>
+            </Panel>
+
+            <Panel title={`Appendix — verification event log (${d.events.length})`} icon={<ScrollText size={14} className="text-cyan-400" />}>
+              {d.events.length === 0 ? (
+                <EmptyState title="No events" />
+              ) : (
+                <ResponsiveTable
+                  dense
+                  rowKey={(r) => r.id}
+                  rows={d.events}
+                  columns={[
+                    { key: 'at', header: 'Timestamp', render: (r) => <span className="font-mono text-[10px]">{formatDate(r.at, true)}</span>, mobilePrimary: true, sortValue: (r) => r.at },
+                    { key: 'provider', header: 'Provider', render: (r) => r.provider, sortValue: (r) => r.provider },
+                    { key: 'endpoint', header: 'Endpoint', render: (r) => <span className="font-mono text-[10px] break-all">{r.endpoint}</span>, className: 'hidden sm:table-cell' },
+                    { key: 'fields', header: 'Fields', render: (r) => <span className="text-[10px]">{r.fieldsRequested.join(', ')}</span>, className: 'hidden xl:table-cell' },
+                    { key: 'code', header: 'HTTP', render: (r) => <Badge tone={r.responseCode < 300 ? 'success' : 'danger'}>{r.responseCode}</Badge>, align: 'center', sortValue: (r) => r.responseCode },
+                    { key: 'lat', header: 'ms', render: (r) => <span className="font-mono">{r.latencyMs}</span>, align: 'right', className: 'hidden lg:table-cell', sortValue: (r) => r.latencyMs },
+                    { key: 'cost', header: 'Cost', render: (r) => <span className="font-mono">{KES(r.costKes)}</span>, align: 'right', sortValue: (r) => r.costKes },
+                    { key: 'consent', header: 'Consent', render: (r) => <span className="font-mono text-[9px] text-slate-500">{r.consentRef}</span>, className: 'hidden xl:table-cell' },
+                    { key: 'outcome', header: 'Outcome', render: (r) => <Badge tone={tone(r.outcome)}>{label(r.outcome)}</Badge>, sortValue: (r) => r.outcome },
+                    { key: 'actor', header: 'Actor', render: (r) => <span className="text-[10px]">{r.actor}</span>, className: 'hidden lg:table-cell' },
+                    { key: 'ip', header: 'IP', render: (r) => <span className="font-mono text-[10px] text-slate-500">{r.ip}</span>, className: 'hidden xl:table-cell' },
+                  ]}
+                  initialSort={{ key: 'at', dir: 'desc' }}
                 />
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-2xl font-extrabold text-white font-mono">{score}%</span>
-                <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider">
-                  {profile.trustLevel} Risk
-                </span>
-              </div>
-            </div>
+              )}
+            </Panel>
 
-            <div className="flex-1 text-center sm:text-left">
-              <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wider block">
-                National Risk Score
-              </span>
-              <h3 className="text-sm sm:text-base font-bold text-emerald-400 mt-0.5">
-                High Trustworthiness & Clean Record
-              </h3>
-              <p className="text-[11px] text-slate-300 mt-1.5 leading-relaxed">
-                Subject has zero adverse listings across CRB TransUnion, active tax compliance with KRA, verified
-                identity with Civil Registration, and validated utility residency via KPLC.
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-[#091629] p-3 sm:p-4 rounded-xl border border-sky-900/40">
-            <h3 className="text-xs font-semibold text-white pb-2 border-b border-sky-900/30">Key Findings</h3>
-            <div className="mt-2 space-y-1.5">
-              {profile.keyFindings.map((finding, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center gap-2 p-2 rounded-lg bg-[#06101c] border border-sky-950/60 text-[11px]"
-                >
-                  <CheckCircle2 size={14} className="text-emerald-400 shrink-0" />
-                  <span className="text-slate-200">{finding}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {reportTab === 'Full Report' && (
-            <div className="bg-[#091629] p-3 sm:p-4 rounded-xl border border-sky-900/40 animate-fade-in">
-              <h3 className="text-xs font-semibold text-white pb-2 border-b border-sky-900/30">
-                {selectedSection}
-              </h3>
-              <div className="mt-3 space-y-2 text-[11px] text-slate-300">
+            <Panel title="Appendix — attestation & disclaimer" icon={<ShieldCheck size={14} className="text-cyan-400" />}>
+              <div className="space-y-2 text-[11px] text-slate-300 leading-relaxed">
                 <p>
-                  Full dossier section for <strong className="text-white">{selectedSection}</strong> covering{' '}
-                  {profile.fullName} (ID {profile.idNumber}).
+                  This report was generated automatically by the IPRS Kenya verification platform on{' '}
+                  <strong>{formatDate(d.generatedAt, true)}</strong> by <strong>{d.attestation.preparedBy}</strong> (
+                  {d.attestation.preparedByTier}). It aggregates responses from {d.attestation.sources.length} authoritative sources:{' '}
+                  {d.attestation.sources.join(', ')}.
                 </p>
-                <div className="grid grid-cols-2 gap-2 font-mono text-[10px]">
-                  <div className="p-2 rounded bg-[#050b14] border border-sky-950">
-                    <div className="text-slate-500">Registry</div>
-                    <div className="text-cyan-300">Verified</div>
-                  </div>
-                  <div className="p-2 rounded bg-[#050b14] border border-sky-950">
-                    <div className="text-slate-500">Confidence</div>
-                    <div className="text-emerald-300">99.7%</div>
-                  </div>
-                  <div className="p-2 rounded bg-[#050b14] border border-sky-950">
-                    <div className="text-slate-500">Source</div>
-                    <div className="text-slate-200">Spin Mobile API</div>
-                  </div>
-                  <div className="p-2 rounded bg-[#050b14] border border-sky-950">
-                    <div className="text-slate-500">Timestamp</div>
-                    <div className="text-slate-200">{new Date().toISOString().slice(0, 19)}Z</div>
-                  </div>
-                </div>
+                <p className="text-slate-400">{d.attestation.disclaimer}</p>
+                <p className="text-[10px] text-slate-500 font-mono">
+                  Classification: {d.attestation.classification} · Retention until {formatDate(d.attestation.retentionExpiry)} ·{' '}
+                  Framework: {settings.compliance.framework} · DPO: {settings.compliance.dpoName} ({settings.compliance.dpoEmail})
+                </p>
+                <p className="text-[10px] text-slate-600">
+                  Viewed by {currentUser?.name ?? '—'} · PII masking {masked ? 'enabled' : 'disabled'} ·{' '}
+                  {settings.branding.reportFooter}
+                </p>
               </div>
-            </div>
-          )}
-        </div>
-
-        <div className="md:col-span-4 bg-[#091629] p-3 sm:p-4 rounded-xl border border-sky-900/40 flex flex-col justify-between">
-          <div>
-            <h3 className="text-xs font-semibold text-white pb-2 border-b border-sky-900/30">Report Sections</h3>
-            <div className="mt-2 space-y-1">
-              {sections.map((sec) => (
-                <button
-                  key={sec}
-                  onClick={() => {
-                    setSelectedSection(sec);
-                    setReportTab('Full Report');
-                  }}
-                  className={`w-full p-2 rounded-lg text-[11px] flex items-center justify-between text-left transition-colors ${
-                    selectedSection === sec && reportTab === 'Full Report'
-                      ? 'bg-sky-600/30 text-cyan-300 font-medium border border-sky-500/40'
-                      : 'hover:bg-[#06101c] text-slate-300 border border-transparent'
-                  }`}
-                >
-                  <span className="truncate">{sec}</span>
-                  <ChevronRight size={12} className="text-slate-500 shrink-0" />
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-3 pt-2 border-t border-sky-900/30 flex items-center justify-between text-[9px] text-slate-400">
-            <span className="font-mono">Doc ID: IPRS-R-2026-{profile.idNumber}</span>
-            <button onClick={handlePrint} className="text-slate-400 hover:text-slate-200 no-print">
-              <Printer size={12} />
-            </button>
-          </div>
-        </div>
+            </Panel>
+          </>
+        )}
       </div>
     </div>
   );
 };
+
+const SubTable: React.FC<{ title: string; headers: string[]; rows: (string | number)[][] }> = ({ title, headers, rows }) => (
+  <div>
+    <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">{title}</div>
+    {rows.length === 0 ? (
+      <p className="text-[10px] text-slate-600 italic">No records.</p>
+    ) : (
+      <div className="overflow-x-auto rounded-lg border border-sky-900/50 bg-[#050b14]">
+        <table className="w-full text-[10px]">
+          <thead>
+            <tr className="bg-[#08172b] text-slate-500 uppercase tracking-wider text-[9px]">
+              {headers.map((h) => (
+                <th key={h} className="text-left px-2 py-1.5 font-bold whitespace-nowrap">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} className="border-t border-sky-950/60">
+                {r.map((cell, j) => (
+                  <td key={j} className="px-2 py-1.5 text-slate-300 align-top break-words max-w-[280px]">
+                    {cell}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+);
+
 export default Screen5_DetailedReport;

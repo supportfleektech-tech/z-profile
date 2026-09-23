@@ -1,9 +1,22 @@
 @import "tailwindcss";
 
+/* ------------------------------------------------------------------ *
+ * Appearance tokens — driven by the Appearance panel in Profile &
+ * Settings (accent, density, font scale, reduced motion).
+ * ------------------------------------------------------------------ */
+:root {
+  --accent: #22d3ee;
+  --accent-soft: rgba(34, 211, 238, 0.16);
+  --density-row: 0.625rem;
+  --density-card: 1rem;
+  --font-scale: 1;
+}
+
 @layer base {
   html {
     scroll-behavior: smooth;
     -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
   }
 
   body {
@@ -12,6 +25,7 @@
     color: #e2e8f0;
     overflow-x: hidden;
     min-height: 100dvh;
+    font-size: calc(1rem * var(--font-scale));
   }
 
   code, pre, .font-mono {
@@ -19,7 +33,7 @@
   }
 
   *:focus-visible {
-    outline: 2px solid rgba(6, 182, 212, 0.7);
+    outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
     outline-offset: 2px;
   }
 
@@ -35,6 +49,12 @@
     input, select, textarea {
       font-size: inherit;
     }
+  }
+
+  /* Nothing may overflow the viewport horizontally on small screens. */
+  #root {
+    max-width: 100vw;
+    overflow-x: hidden;
   }
 }
 
@@ -63,6 +83,15 @@
   scrollbar-color: #1e3a5f #081426;
 }
 
+/* Hide scrollbars on horizontally-scrolling tab strips */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Cyber grid background */
 .bg-tech-grid {
   background-size: 32px 32px;
@@ -77,17 +106,9 @@
 }
 
 /* Glowing borders and accents */
-.glow-cyan {
-  box-shadow: 0 0 15px -3px rgba(6, 182, 212, 0.35);
-}
-
-.glow-blue {
-  box-shadow: 0 0 20px -5px rgba(2, 132, 199, 0.4);
-}
-
-.glow-emerald {
-  box-shadow: 0 0 15px -3px rgba(16, 185, 129, 0.35);
-}
+.glow-cyan { box-shadow: 0 0 15px -3px rgba(6, 182, 212, 0.35); }
+.glow-blue { box-shadow: 0 0 20px -5px rgba(2, 132, 199, 0.4); }
+.glow-emerald { box-shadow: 0 0 15px -3px rgba(16, 185, 129, 0.35); }
 
 /* Animations */
 @keyframes ping-slow {
@@ -95,105 +116,191 @@
   50% { transform: scale(1.15); opacity: 0.3; }
   100% { transform: scale(0.95); opacity: 0.8; }
 }
+.animate-ping-slow { animation: ping-slow 3s cubic-bezier(0, 0, 0.2, 1) infinite; }
 
-.animate-ping-slow {
-  animation: ping-slow 3s cubic-bezier(0, 0, 0.2, 1) infinite;
-}
-
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.animate-fade-in,
-.animate-fadeIn {
-  animation: fade-in 0.2s ease-out forwards;
-}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.animate-fade-in, .animate-fadeIn { animation: fade-in 0.2s ease-out forwards; }
 
 @keyframes scale-in {
   from { opacity: 0; transform: scale(0.96) translateY(-6px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
-
-.animate-scale-in {
-  animation: scale-in 0.2s ease-out forwards;
-}
+.animate-scale-in { animation: scale-in 0.2s ease-out forwards; }
 
 @keyframes slide-in-right {
   from { opacity: 0; transform: translateX(24px); }
   to { opacity: 1; transform: translateX(0); }
 }
-
-.animate-slide-in-right {
-  animation: slide-in-right 0.28s ease-out forwards;
-}
+.animate-slide-in-right { animation: slide-in-right 0.28s ease-out forwards; }
 
 @keyframes slide-in-left {
   from { opacity: 0; transform: translateX(-24px); }
   to { opacity: 1; transform: translateX(0); }
 }
-
-.animate-slide-in-left {
-  animation: slide-in-left 0.25s ease-out forwards;
-}
+.animate-slide-in-left { animation: slide-in-left 0.25s ease-out forwards; }
 
 @keyframes slide-up {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
 }
-
-.animate-slide-up {
-  animation: slide-up 0.35s ease-out forwards;
-}
+.animate-slide-up { animation: slide-up 0.35s ease-out forwards; }
 
 @keyframes page-enter {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
-
-.animate-page-enter {
-  animation: page-enter 0.3s ease-out forwards;
-}
+.animate-page-enter { animation: page-enter 0.3s ease-out forwards; }
 
 /* Card hover lift */
 .card-lift {
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
-
 .card-lift:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(6, 182, 212, 0.15);
 }
 
 /* Safe area for mobile notches */
-.safe-bottom {
-  padding-bottom: env(safe-area-inset-bottom, 0);
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0); }
+.safe-top { padding-top: env(safe-area-inset-top, 0); }
+
+/* Comfortable/compact density */
+.density-compact { --density-row: 0.375rem; --density-card: 0.75rem; }
+.density-comfortable { --density-row: 0.625rem; --density-card: 1rem; }
+
+/* Tabular numerals for financial grids */
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Reduced motion preference (also toggled from Appearance) */
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
 }
 
-.safe-top {
-  padding-top: env(safe-area-inset-top, 0);
-}
-
-/* Reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }
 
-/* Print styles for reports */
+/* ------------------------------------------------------------------ *
+ * PRINT — the report, not the app
+ * ------------------------------------------------------------------ */
+
+#print-root { display: none; }
+
 @media print {
-  body {
-    background: white;
-    color: black;
+  /* Hide the entire application chrome; show only the report document. */
+  #root { display: none !important; }
+  #print-root { display: block !important; }
+
+  @page {
+    size: A4;
+    margin: 14mm 12mm 16mm 12mm;
+  }
+  @page :first { margin-top: 12mm; }
+
+  html, body {
+    background: #fff !important;
+    color: #000 !important;
+    font-size: 9.5pt;
+    overflow: visible !important;
   }
 
-  header,
-  .no-print {
-    display: none !important;
+  .pr-doc {
+    width: 100%;
+    color: #111;
+    font-family: 'Inter', Arial, Helvetica, sans-serif;
+    line-height: 1.45;
   }
+
+  .pr-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 1.6pt solid #111;
+    padding-bottom: 5pt;
+    margin-bottom: 10pt;
+  }
+  .pr-brand { font-size: 14pt; font-weight: 800; letter-spacing: 0.06em; }
+  .pr-org { font-size: 8pt; color: #444; margin-top: 1pt; }
+  .pr-header-right { text-align: right; }
+  .pr-classification {
+    font-size: 7.5pt; font-weight: 700; letter-spacing: 0.05em;
+    border: 0.8pt solid #b91c1c; color: #b91c1c; padding: 1.5pt 4pt; display: inline-block;
+  }
+  .pr-report-id { font-family: 'JetBrains Mono', monospace; font-size: 8pt; margin-top: 3pt; color: #333; }
+
+  .pr-doc h1 { font-size: 15pt; font-weight: 800; margin: 0 0 3pt; }
+  .pr-subtitle { font-size: 9pt; color: #444; margin: 0 0 9pt; }
+  .pr-doc h2 {
+    font-size: 10.5pt; font-weight: 700; margin: 12pt 0 5pt;
+    padding-bottom: 2.5pt; border-bottom: 0.7pt solid #cbd5e1;
+    break-after: avoid; page-break-after: avoid;
+  }
+  .pr-doc h3 { font-size: 9.5pt; font-weight: 700; margin: 8pt 0 3pt; break-after: avoid; page-break-after: avoid; }
+  .pr-doc h4 { font-size: 8.5pt; font-weight: 700; margin: 6pt 0 2pt; color: #334155; break-after: avoid; }
+
+  .pr-verdict {
+    border: 0.9pt solid #0f766e; background: #f0fdfa; padding: 6pt 8pt; margin-bottom: 10pt;
+    break-inside: avoid; page-break-inside: avoid;
+  }
+  .pr-verdict strong { display: block; font-size: 10.5pt; color: #0f766e; margin-bottom: 2pt; }
+  .pr-verdict span { font-size: 8.8pt; color: #134e4a; }
+
+  .pr-section { break-inside: auto; }
+  .pr-subsection { break-inside: avoid; page-break-inside: avoid; margin-bottom: 8pt; }
+  .pr-page-break { break-before: page; page-break-before: always; }
+
+  table { width: 100%; border-collapse: collapse; margin: 4pt 0 6pt; }
+
+  .pr-kv th {
+    text-align: left; width: 32%; font-weight: 600; color: #334155;
+    padding: 2.6pt 5pt; border-bottom: 0.4pt solid #e2e8f0; font-size: 8.6pt; vertical-align: top;
+  }
+  .pr-kv td {
+    padding: 2.6pt 5pt; border-bottom: 0.4pt solid #e2e8f0; font-size: 8.6pt; vertical-align: top;
+  }
+  .pr-kv-compact th, .pr-kv-compact td { padding: 1.8pt 4pt; font-size: 8pt; }
+  .pr-sign th { width: 26%; }
+
+  .pr-table th {
+    text-align: left; font-size: 7.6pt; text-transform: uppercase; letter-spacing: 0.04em;
+    background: #eef2f7; border: 0.5pt solid #cbd5e1; padding: 3pt 4pt; font-weight: 700; color: #1e293b;
+  }
+  .pr-table td { border: 0.5pt solid #dbe2ea; padding: 2.6pt 4pt; font-size: 8pt; vertical-align: top; }
+  .pr-table tr { break-inside: avoid; page-break-inside: avoid; }
+  .pr-table-narrow td, .pr-table-narrow th { font-size: 7.2pt; padding: 2pt 3pt; }
+  .pr-table thead { display: table-header-group; }
+
+  .pr-mono, .pr-raw { font-family: 'JetBrains Mono', monospace; }
+  .pr-raw {
+    background: #f8fafc; border: 0.5pt solid #dbe2ea; padding: 4pt 5pt;
+    font-size: 7pt; white-space: pre-wrap; word-break: break-word; margin: 2pt 0 5pt;
+  }
+
+  .pr-note { font-size: 8.4pt; color: #475569; margin: 2pt 0 4pt; }
+  .pr-list { margin: 2pt 0 6pt 14pt; padding: 0; }
+  .pr-list li { font-size: 8.4pt; margin-bottom: 1.5pt; }
+
+  .pr-flag { font-size: 8.2pt; padding: 3pt 5pt; margin: 3pt 0; border-left: 2.4pt solid #64748b; background: #f8fafc; }
+  .pr-flag-warning { border-color: #d97706; background: #fffbeb; }
+  .pr-flag-danger { border-color: #dc2626; background: #fef2f2; }
+
+  .pr-disclaimer {
+    margin-top: 10pt; padding: 6pt 8pt; border: 0.7pt solid #cbd5e1; background: #f8fafc;
+    font-size: 8pt; color: #334155; break-inside: avoid; page-break-inside: avoid;
+  }
+  .pr-footer-note { margin-top: 8pt; font-size: 7.6pt; color: #64748b; text-align: center; }
+  .pr-end {
+    margin-top: 10pt; text-align: center; font-size: 8.4pt; font-weight: 700;
+    letter-spacing: 0.14em; color: #475569;
+  }
+
+  a { color: inherit; text-decoration: none; }
 }

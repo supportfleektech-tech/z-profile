@@ -5,11 +5,17 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "server": "node server/index.mjs",
+    "dev:all": "node server/index.mjs & vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "db:reset": "node -e \"require('fs').rmSync('server/.data',{recursive:true,force:true});console.log('database cleared \u2014 reseeds on next start')\""
   },
   "dependencies": {
     "clsx": "2.1.1",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "lucide-react": "^1.46.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",
@@ -25,5 +31,8 @@
     "typescript": "5.9.3",
     "vite": "7.3.2",
     "vite-plugin-singlefile": "2.3.0"
+  },
+  "engines": {
+    "node": ">=22.5.0"
   }
 }

@@ -12,13 +12,27 @@ import {
 import { useAppData } from '../../context/AppDataContext';
 import { NotificationItem } from '../../types';
 
+/**
+ * Alerts & Notifications.
+ *
+ * Reads `visibleNotifications`, NOT the raw `notifications` list: the context scopes
+ * alerts to the signed-in account (plus org-wide broadcasts), so a User-tier analyst
+ * never sees another analyst's billing or security alerts. Tab counts are derived from
+ * the same scoped list so they can never disagree with the header badge.
+ */
 export const Screen14_AlertsNotifications: React.FC = () => {
-  const { notifications, markNotificationRead, markAllNotificationsRead, unreadCount } = useAppData();
+  const { visibleNotifications, markNotificationRead, markAllNotificationsRead, unreadCount } = useAppData();
   const [activeTab, setActiveTab] = useState<'All' | 'Security' | 'System' | 'Billing' | 'Reports'>('All');
+  const [hideRead, setHideRead] = useState(false);
 
   const filteredItems = useMemo(
-    () => notifications.filter((n) => (activeTab === 'All' ? true : n.category === activeTab)),
-    [notifications, activeTab]
+    () =>
+      visibleNotifications.filter((n) => {
+        if (activeTab !== 'All' && n.category !== activeTab) return false;
+        if (hideRead && n.read) return false;
+        return true;
+      }),
+    [visibleNotifications, activeTab, hideRead]
   );
 
   const getNotificationIcon = (n: NotificationItem) => {
@@ -72,21 +86,32 @@ export const Screen14_AlertsNotifications: React.FC = () => {
           <h2 className="text-xs sm:text-sm font-bold text-white">Notifications</h2>
         </div>
 
-        <button
-          onClick={markAllNotificationsRead}
-          disabled={unreadCount === 0}
-          className="text-[10px] text-cyan-400 hover:text-cyan-300 font-medium flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <CheckCheck size={12} /> Mark all read
-        </button>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            onClick={() => setHideRead((v) => !v)}
+            className={`text-[10px] font-medium flex items-center gap-1 transition-colors ${
+              hideRead ? 'text-cyan-300' : 'text-slate-500 hover:text-slate-300'
+            }`}
+            title="Show only unread alerts"
+          >
+            <Check size={12} /> Unread only
+          </button>
+          <button
+            onClick={markAllNotificationsRead}
+            disabled={unreadCount === 0}
+            className="text-[10px] text-cyan-400 hover:text-cyan-300 font-medium flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <CheckCheck size={12} /> <span className="hidden sm:inline">Mark all read</span>
+          </button>
+        </div>
       </div>
 
       <div className="px-3 sm:px-4 py-1.5 bg-[#081527] border-b border-sky-900/40 flex items-center gap-2 overflow-x-auto">
         {(['All', 'Security', 'System', 'Billing', 'Reports'] as const).map((tab) => {
           const count =
             tab === 'All'
-              ? notifications.filter((n) => !n.read).length
-              : notifications.filter((n) => n.category === tab && !n.read).length;
+              ? visibleNotifications.filter((n) => !n.read).length
+              : visibleNotifications.filter((n) => n.category === tab && !n.read).length;
           return (
             <button
               key={tab}
@@ -112,7 +137,16 @@ export const Screen14_AlertsNotifications: React.FC = () => {
         {filteredItems.length === 0 && (
           <div className="py-12 text-center text-slate-500">
             <Bell size={28} className="mx-auto mb-2 opacity-40" />
-            <p className="text-sm">No notifications in this category</p>
+            <p className="text-sm">
+              {hideRead && visibleNotifications.some((n) => n.read)
+                ? 'No unread alerts here'
+                : 'No notifications in this category'}
+            </p>
+            {hideRead && (
+              <button onClick={() => setHideRead(false)} className="mt-2 text-[10px] text-cyan-400 hover:text-cyan-300">
+                Show read alerts
+              </button>
+            )}
           </div>
         )}
         {filteredItems.map((notif) => (

@@ -1,279 +1,46 @@
-import { CaseItem, IdentityProfile, InvoiceItem, NotificationItem, ProviderItem, UserItem } from '../types';
+/**
+ * Compatibility + derived seed data.
+ *
+ * Older screens import from here; the canonical sources now live in `./seed`,
+ * `./users`, `./providers`, `./pricing` and `./dossier`. This module re-exports them and
+ * derives the legacy `ProviderItem` / `pricingPlans` / `primaryProfile` shapes so nothing
+ * drifts between the two representations.
+ */
+import type { IdentityProfile, PricingPlan, ProviderItem, SystemUser } from '../types';
+import { casesData, invoicesData, notificationsData, recentActivities } from './seed';
+import { seedUsers } from './users';
+import { seedProviderConfigs } from './providers';
+import { pricingCatalog, subscriptionPlans } from './pricing';
+import { dossierToProfile, primaryDossier } from './dossier';
 
-export const primaryProfile: IdentityProfile = {
-  id: 'IPRS-P-9021',
-  fullName: 'John Mwangi Kamau',
-  idNumber: '23456789',
-  phone: '0712345678',
-  dob: '15 May 1990',
-  gender: 'Male',
-  nationality: 'Kenyan',
-  county: 'Nairobi',
-  kraPin: 'A123456789K',
-  avatarUrl: '/images/avatar-john.jpg',
-  isVerified: true,
-  riskScore: 92,
-  trustLevel: 'High',
-  providers: {
-    kra: { verified: true, status: 'Verified', pin: 'A123456789K', taxCompliance: true },
-    mpesa: { verified: true, status: 'Verified', accountName: 'JOHN MWANGI KAMAU', activeSince: '2012' },
-    crb: { verified: true, status: 'Verified', score: 785, defaultStatus: 'None' },
-    employer: { verified: true, status: 'Verified', company: 'Safaricom Telecommunications PLC', position: 'Senior Systems Engineer' },
-    kplc: { verified: true, status: 'Verified', meterNumber: '04219842-12', activeAccount: true },
-  },
-  keyFindings: [
-    'Valid KRA PIN and details',
-    'Active M-PESA account',
-    'No negative CRB records',
-    'Current employer verified',
-    'Active KPLC account',
-  ],
-};
+export { casesData, invoicesData, notificationsData, recentActivities };
+export { seedUsers, seedProviderConfigs, pricingCatalog, primaryDossier };
+export { seedWallets, seedWalletTransactions, seedPayments, seedPaymentMethods, seedSessions, seedAudit, seedUsage } from './seed';
+export { seedApiKeys, seedProviderLogs } from './providers';
+export { defaultSettings, SETTINGS_GROUPS } from './settings';
+export { subscriptionPlans, estimateCost, priceChecks, itemById } from './pricing';
 
-export const casesData: CaseItem[] = [
-  {
-    id: 'c1',
-    caseId: 'IPRS-00432',
-    subject: 'John Mwangi',
-    type: 'Full Background',
-    priority: 'High',
-    status: 'In Progress',
-    updated: '2h ago',
-  },
-  {
-    id: 'c2',
-    caseId: 'IPRS-00431',
-    subject: 'Grace Wanjiku',
-    type: 'Identity Verification',
-    priority: 'Medium',
-    status: 'Open',
-    updated: '5h ago',
-  },
-  {
-    id: 'c3',
-    caseId: 'IPRS-00430',
-    subject: 'Peter Kimani',
-    type: 'M-PESA KYC',
-    priority: 'Medium',
-    status: 'Completed',
-    updated: '1d ago',
-  },
-  {
-    id: 'c4',
-    caseId: 'IPRS-00429',
-    subject: 'Amina Hassan',
-    type: 'CRB Check',
-    priority: 'High',
-    status: 'In Progress',
-    updated: '1d ago',
-  },
-  {
-    id: 'c5',
-    caseId: 'IPRS-00428',
-    subject: 'Daniel Otieno',
-    type: 'Employer Verification',
-    priority: 'Low',
-    status: 'Closed',
-    updated: '2d ago',
-  },
-];
+/** Legacy export name consumed by the app context. */
+export const adminUsersData: SystemUser[] = seedUsers;
 
-export const providersData: ProviderItem[] = [
-  {
-    id: 'p-kra',
-    name: 'KRA',
-    code: 'KRA-TAX-GW',
-    category: 'Tax & Compliance Authority',
-    status: 'Active',
-    lastSync: '5 min ago',
-    latencyMs: 142,
-    uptime: '99.98%',
-    color: '#ef4444',
-  },
-  {
-    id: 'p-mpesa',
-    name: 'M-PESA',
-    code: 'SAF-MPESA-KYC',
-    category: 'Mobile Money Registry',
-    status: 'Active',
-    lastSync: '8 min ago',
-    latencyMs: 88,
-    uptime: '99.99%',
-    color: '#10b981',
-  },
-  {
-    id: 'p-crb',
-    name: 'CRB (TransUnion)',
-    code: 'CRB-TU-KENYA',
-    category: 'Credit Bureau Intelligence',
-    status: 'Active',
-    lastSync: '12 min ago',
-    latencyMs: 210,
-    uptime: '99.94%',
-    color: '#06b6d4',
-  },
-  {
-    id: 'p-employer',
-    name: 'Employer Verification',
-    code: 'CORP-PAYROLL-API',
-    category: 'Corporate Registry',
-    status: 'Active',
-    lastSync: '15 min ago',
-    latencyMs: 320,
-    uptime: '99.85%',
-    color: '#3b82f6',
-  },
-  {
-    id: 'p-kplc',
-    name: 'KPLC',
-    code: 'KPLC-GRID-API',
-    category: 'Utility & Address Verification',
-    status: 'Active',
-    lastSync: '20 min ago',
-    latencyMs: 175,
-    uptime: '99.92%',
-    color: '#f59e0b',
-  },
-];
+/** Legacy provider card shape, derived from the full configuration records. */
+export const providersData: ProviderItem[] = seedProviderConfigs.map((p) => ({
+  id: p.id,
+  name: p.name,
+  code: p.code,
+  category: p.category,
+  status: p.enabled ? p.status : 'Disabled',
+  lastSync: p.lastSync,
+  latencyMs: p.latencyMs,
+  uptime: p.uptime,
+  color: p.color,
+}));
 
-export const adminUsersData: UserItem[] = [
-  { id: 'u1', name: 'John Kamau', email: 'admin@iprs.co.ke', role: 'Super Admin', status: 'Active' },
-  { id: 'u2', name: 'Sarah Wanjiku', email: 'sarah@iprs.co.ke', role: 'Analyst', status: 'Active' },
-  { id: 'u3', name: 'Mike Ochieng', email: 'officer@iprs.co.ke', role: 'Officer', status: 'Active' },
-  { id: 'u4', name: 'Grace Njeri', email: 'viewer@iprs.co.ke', role: 'Viewer', status: 'Active' },
-  { id: 'u5', name: 'David Mbugua', email: 'billing@iprs.co.ke', role: 'Billing', status: 'Active' },
-];
+/** Legacy plan shape consumed by Billing and Pricing screens. */
+export const pricingPlans: PricingPlan[] = subscriptionPlans;
 
-export const invoicesData: InvoiceItem[] = [
-  { id: 'inv1', invoiceNo: 'INV-01923', date: '15 Sep 2026', amount: 'KES 25,000', status: 'Paid' },
-  { id: 'inv2', invoiceNo: 'INV-01922', date: '15 Aug 2026', amount: 'KES 25,000', status: 'Paid' },
-  { id: 'inv3', invoiceNo: 'INV-01921', date: '15 Jul 2026', amount: 'KES 25,000', status: 'Paid' },
-];
+/** Legacy profile shape derived from the full dossier. */
+export const primaryProfile: IdentityProfile = dossierToProfile(primaryDossier);
 
-export const notificationsData: NotificationItem[] = [
-  {
-    id: 'n1',
-    title: 'New case assigned',
-    description: 'Case IPRS-00432 has been assigned to you.',
-    time: '2m ago',
-    category: 'System',
-    type: 'success',
-    read: false,
-  },
-  {
-    id: 'n2',
-    title: 'Payment successful',
-    description: 'KES 25,000.00 payment received.',
-    time: '12m ago',
-    category: 'Billing',
-    type: 'info',
-    read: false,
-  },
-  {
-    id: 'n3',
-    title: 'Provider sync completed',
-    description: 'KRA data sync completed successfully.',
-    time: '30m ago',
-    category: 'System',
-    type: 'info',
-    read: true,
-  },
-  {
-    id: 'n4',
-    title: 'High-risk detected',
-    description: 'Case IPRS-00428 flagged with high risk.',
-    time: '1h ago',
-    category: 'Security',
-    type: 'danger',
-    read: false,
-  },
-  {
-    id: 'n5',
-    title: 'System maintenance',
-    description: 'Scheduled maintenance on Oct 5, 2026.',
-    time: '3h ago',
-    category: 'System',
-    type: 'warning',
-    read: true,
-  },
-];
-
-export const recentActivities = [
-  {
-    id: 'a1',
-    title: 'Identity Report - John Mwangi',
-    time: '2m ago',
-    status: 'Completed',
-    type: 'identity',
-  },
-  {
-    id: 'a2',
-    title: 'M-PESA KYC - Jane Doe',
-    time: '5 min ago',
-    status: 'Completed',
-    type: 'mpesa',
-  },
-  {
-    id: 'a3',
-    title: 'CRB Check - Peter Otieno',
-    time: '12 min ago',
-    status: 'Completed',
-    type: 'crb',
-  },
-  {
-    id: 'a4',
-    title: 'KPLC - Business Verification',
-    time: '20 min ago',
-    status: 'Completed',
-    type: 'kplc',
-  },
-];
-
-export const pricingPlans = [
-  {
-    id: 'starter',
-    name: 'Starter',
-    monthlyPrice: 5000,
-    yearlyPrice: 4000,
-    period: '/month',
-    subtitle: 'For individuals & small teams',
-    features: ['100 searches/month', 'Basic reports', 'Email support', '1 user'],
-    highlighted: false,
-    ctaText: 'Get Started',
-  },
-  {
-    id: 'professional',
-    name: 'Professional',
-    monthlyPrice: 25000,
-    yearlyPrice: 20000,
-    period: '/month',
-    badge: 'Most Popular',
-    subtitle: 'For growing businesses & agencies',
-    features: ['1,000 searches/month', 'All provider checks', 'API access', 'Priority support', '5 users'],
-    highlighted: true,
-    ctaText: 'Get Started',
-  },
-  {
-    id: 'business',
-    name: 'Business',
-    monthlyPrice: 50000,
-    yearlyPrice: 40000,
-    period: '/month',
-    subtitle: 'Scaling organizations with heavy workload',
-    features: ['5,000 searches/month', 'Advanced analytics', 'Custom reports', 'Dedicated support', '10 users'],
-    highlighted: false,
-    ctaText: 'Get Started',
-  },
-  {
-    id: 'enterprise',
-    name: 'Enterprise',
-    customPrice: 'Custom Pricing',
-    monthlyPrice: 0,
-    yearlyPrice: 0,
-    period: '',
-    subtitle: 'High-volume institutional & gov partners',
-    features: ['Unlimited searches', 'Full API access', 'Custom integrations', 'SLA & dedicated support', 'Unlimited users'],
-    highlighted: false,
-    ctaText: 'Contact Sales',
-  },
-];
+/** Convenience: the 0–500 batch label used across billing surfaces. */
+export const BATCH_LABEL = pricingCatalog.batchLabel;
