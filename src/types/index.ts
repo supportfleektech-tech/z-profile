@@ -657,6 +657,26 @@ export interface PricedItem {
   overageRateKes: number;
   turnaround: string;
   confidence: 'High' | 'Medium' | 'Standard';
+  /**
+   * The proposal groups its APIs under headings ("Identity Verification APIs",
+   * "Utility & Compliance APIs", …). Carried per item so the Pricing screen can
+   * reproduce the proposal's own structure instead of a flat list.
+   */
+  proposalGroup?: string;
+  /**
+   * Per-item provenance. The catalogue-level flag can only say "all or nothing",
+   * but the received proposal extract confirms the KYC APIs and says nothing about
+   * the KYB products — so each line states its own status and the banners report
+   * an exact confirmed/total count rather than silently hiding unconfirmed rates.
+   */
+  confirmedFromProposal?: boolean;
+  /**
+   * The proposal quotes a "Back Up Rate" alongside the unit price for the Identity
+   * Verification APIs: what is charged when the primary source cannot answer.
+   */
+  backupRateKes?: number;
+  /** Per-page component for page-metered pricing (scanned statement analysis). */
+  perPageKes?: number;
 }
 
 export interface PricingBundle {

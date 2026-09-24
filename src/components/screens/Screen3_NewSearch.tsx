@@ -6,7 +6,7 @@ import {
 import { useAppData } from '../../context/AppDataContext';
 import { useAppRouter } from '../../context/RouterContext';
 import { Badge, Button, Callout, Checkbox, Field, Panel, Select, TextInput } from '../ui';
-import { kycItems, kybItems } from '../../data/pricing';
+import { kycItems, kybItems, pricingProvenance } from '../../data/pricing';
 import { KES, uid } from '../../lib/format';
 import type { PricedItem } from '../../types';
 
@@ -34,6 +34,7 @@ const COUNTIES = [
  */
 export const Screen3_NewSearch: React.FC<Props> = ({ onExecuteSearch }) => {
   const { pricing, wallet, runSearch, preflightSearch, priceSearch, visibleCases, settings } = useAppData();
+  const prov = pricingProvenance(pricing);
   const { navigate } = useAppRouter();
 
   const [fullName, setFullName] = useState('');
@@ -166,11 +167,11 @@ export const Screen3_NewSearch: React.FC<Props> = ({ onExecuteSearch }) => {
         </div>
       </div>
 
-      {!pricing.confirmedFromProposal && (
+      {!prov.allConfirmed && (
         <div className="px-3 sm:px-4 pt-3">
-          <Callout tone="warning" title="Provisional pricing">
-            Rates shown come from <strong>{pricing.proposalRef}</strong> and are flagged as placeholders until the proposal figures
-            are confirmed. Set them in <em>Pricing &amp; Tiers</em> (admin) once transcribed.
+          <Callout tone="warning" title={`Provisional pricing — ${prov.provisional} of ${prov.total} rates unconfirmed`}>
+            {prov.confirmed} rates are transcribed from <strong>{pricing.proposalRef}</strong>. The remaining {prov.provisional} are
+            placeholders and are marked as such in the catalogue below.
           </Callout>
         </div>
       )}

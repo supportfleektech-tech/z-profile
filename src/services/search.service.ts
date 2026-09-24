@@ -47,6 +47,15 @@ const ITEM_PROVIDER: Record<string, string> = {
   'kyc-criminal': 'p-court',
   'kyc-pep': 'p-screen',
   'kyc-deceased': 'civil',
+  'kyc-face': 'civil',
+  'kyc-bank': 'p-bank',
+  'kyc-alien': 'p-immigration',
+  'kyc-passport': 'p-immigration',
+  'kyc-sim': 'p-telco',
+  'kyc-namephone': 'p-telco',
+  'kyc-phonebyid': 'p-crb',
+  'kyc-statement': 'p-statement',
+  'kyc-vehicle': 'p-ntsa',
   'kyb-registry': 'p-brs',
   'kyb-directors': 'p-brs',
   'kyb-bo': 'p-brs',
@@ -56,10 +65,20 @@ const ITEM_PROVIDER: Record<string, string> = {
   'kyb-licence': 'p-brs',
 };
 
+/*
+ * Display names for the virtual providers — sources that the catalogue routes to but
+ * that are not seeded as managed provider records (no contract, SLA or credentials to
+ * administer). `search.service` falls back to this map when no provider config exists.
+ */
 const ITEM_PROVIDER_NAME: Record<string, string> = {
   civil: 'IPRS Civil Registration',
   'p-court': 'Judiciary Records',
   'p-screen': 'Global Watchlist Aggregator',
+  'p-bank': 'Bank Account Verification Network',
+  'p-immigration': 'Directorate of Immigration Services',
+  'p-telco': 'Telecom SIM Registry',
+  'p-statement': 'Statement Analysis Engine',
+  'p-ntsa': 'NTSA Vehicle Register',
 };
 
 export const searchService = {

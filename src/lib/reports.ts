@@ -592,11 +592,15 @@ export function buildPricingSchedulePdf(catalog: PricingCatalog, settings: Syste
 
   doc.heading('KYC / KYB Financial Proposal 2026', 1);
   doc.text(`Price schedule — batch ${catalog.batchLabel}`, { size: 11, color: COLORS.slate });
-  if (!catalog.confirmedFromProposal) {
+  const confirmedCount = catalog.items.filter((i) => i.confirmedFromProposal).length;
+  const provisionalCount = catalog.items.length - confirmedCount;
+  if (provisionalCount > 0 || !catalog.confirmedFromProposal) {
     doc.callout(
-      'Provisional schedule',
-      'These figures are placeholders pending transcription of the signed KYC/KYB Financial Proposal 2026. Update src/data/pricing.ts and set confirmedFromProposal to true to remove this notice.',
-      { accent: COLORS.amber }
+      provisionalCount === 0 ? 'Schedule confirmed' : `Partly provisional schedule — ${provisionalCount} of ${catalog.items.length} rates unconfirmed`,
+      provisionalCount === 0
+        ? `All ${confirmedCount} rates are transcribed from the ${catalog.proposalRef} (batch ${catalog.batchLabel}). Set confirmedFromProposal to clear this notice.`
+        : `${confirmedCount} of ${catalog.items.length} rates are transcribed from the ${catalog.proposalRef} (batch ${catalog.batchLabel}). The remaining ${provisionalCount} are placeholders — the Vehicle Verification table was received truncated and the extract quotes no criminal, deceased or KYB products. Rows marked provisional should not be treated as contracted pricing.`,
+      { accent: provisionalCount === 0 ? COLORS.green : COLORS.amber }
     );
   }
   doc.keyValue([

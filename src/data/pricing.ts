@@ -6,14 +6,19 @@ import type { PricingCatalog, PricingPlan } from '../types';
  *  Band in use: 0 – 500 verifications (per instruction, higher bands are NOT used)
  * ═══════════════════════════════════════════════════════════════════════════════
  *
- *  ⚠ PLACEHOLDER FIGURES — replace with the numbers from
- *    "KYC KYB Financial Proposal 2026.pdf".
+ *  STATUS: the KYC / identity API rates below are TRANSCRIBED FROM THE PROPOSAL and
+ *  carry `confirmedFromProposal: true` individually. Three items are still provisional:
  *
- *    The PDF was not present in the repository when this was built. Every consumer
- *    (Pricing & Tiers screen, Billing, wallet debit rates, cost calculator, PDF price
- *    schedule, Admin pricing editor) reads from THIS FILE ONLY, so updating the real
- *    proposal is a single-file edit. Set `confirmedFromProposal: true` once the figures
- *    have been transcribed — the UI stops showing the "provisional" banner.
+ *    • Motor Vehicle Ownership — the proposal's Vehicle Verification table was cut off
+ *      mid-row, so its 0–500 rate was never received.
+ *    • Criminal & Court Record Check and Deceased Registry Check — not covered by the
+ *      received extract.
+ *    • ALL seven KYB products — the extract quotes no KYB pricing at all.
+ *
+ *  The catalogue-level flag therefore stays `false` until those arrive; the banners
+ *  report an exact confirmed/total count so nothing unconfirmed is silently presented
+ *  as final. Every consumer (Pricing & Tiers, Billing, wallet debit rates, the cost
+ *  calculator, the PDF price schedule, the Admin pricing editor) reads THIS FILE ONLY.
  *
  * ═══════════════════════════════════════════════════════════════════════════════
  */
@@ -35,116 +40,292 @@ export const pricingCatalog: PricingCatalog = {
 
   /* ------------------------------- KYC line items ------------------------------- */
   items: [
+    /*
+     * KYC line items — transcribed from the received proposal extract.
+     * Band in use: 0 – 500 (VAT exclusive). The proposal quotes a unit price and, for
+     * the Identity Verification APIs, a separate "Back Up Rate" charged when the primary
+     * source cannot answer. Higher volume bands (501–2,500 and above) are deliberately
+     * NOT wired — only the 0–500 batch is in use.
+     */
+
+    /* ---- Identity Verification APIs · KES 30 unit / KES 45 back-up rate ---- */
     {
       id: 'kyc-id',
-      name: 'National ID Verification',
+      name: "'IPRS Standard — National ID Verification'",
       type: 'kyc',
-      description: 'Civil registration match on ID number + name + date of birth, with photo-match score.',
-      source: 'IPRS / National Registration Bureau via Spin Mobile',
-      unitPriceKes: 50,
+      description: 'Civil registration match on ID number, name and date of birth against the national register.',
+      source: 'IPRS / National Registration Bureau',
+      unitPriceKes: 30,
       includedInBatch: 500,
-      overageRateKes: 58,
+      overageRateKes: 30,
+      backupRateKes: 45,
       turnaround: 'Real-time (< 3s)',
       confidence: 'High',
-    },
-    {
-      id: 'kyc-kra',
-      name: 'KRA PIN Validation',
-      type: 'kyc',
-      description: 'PIN existence, registration date, tax obligation types, compliance standing and arrears.',
-      source: 'Kenya Revenue Authority iTax gateway',
-      unitPriceKes: 40,
-      includedInBatch: 500,
-      overageRateKes: 46,
-      turnaround: 'Real-time (< 4s)',
-      confidence: 'High',
+      proposalGroup: 'Identity Verification APIs',
+      confirmedFromProposal: true,
     },
     {
       id: 'kyc-mpesa',
-      name: 'M-PESA Name & Number Match',
+      name: "'Match ID & Phone Number'",
       type: 'kyc',
-      description: 'MSISDN-to-registered-name match, KYC tier, account tenure and activity band.',
-      source: 'Safaricom M-PESA KYC registry',
+      description: 'Confirms that a national ID number and a mobile number belong to the same registered subscriber.',
+      source: 'IPRS cross-referenced with the mobile subscriber register',
       unitPriceKes: 30,
       includedInBatch: 500,
-      overageRateKes: 35,
-      turnaround: 'Real-time (< 2s)',
+      overageRateKes: 30,
+      backupRateKes: 45,
+      turnaround: 'Real-time (< 3s)',
       confidence: 'High',
-    },
-    {
-      id: 'kyc-crb',
-      name: 'CRB Individual Report & Score',
-      type: 'kyc',
-      description: 'Credit score, listing status, facility schedule, utilisation and adverse listings.',
-      source: 'TransUnion CRB Kenya',
-      unitPriceKes: 450,
-      includedInBatch: 150,
-      overageRateKes: 520,
-      turnaround: '5 – 15s',
-      confidence: 'High',
-    },
-    {
-      id: 'kyc-address',
-      name: 'Address & Utility Verification',
-      type: 'kyc',
-      description: 'Physical address confirmation against a live utility account and billing behaviour.',
-      source: 'KPLC / Kenya Power grid API',
-      unitPriceKes: 60,
-      includedInBatch: 300,
-      overageRateKes: 70,
-      turnaround: 'Real-time (< 5s)',
-      confidence: 'Medium',
+      proposalGroup: 'Identity Verification APIs',
+      confirmedFromProposal: true,
     },
     {
       id: 'kyc-employer',
-      name: 'Employer Verification',
+      name: "'Employer Verification'",
       type: 'kyc',
-      description: 'Current and historical employment, position, contract type and income band.',
-      source: 'Corporate payroll registry',
-      unitPriceKes: 150,
-      includedInBatch: 200,
-      overageRateKes: 175,
-      turnaround: '1 – 24h (async)',
+      description: 'Confirms current employment, employer name and job title with the declared employer.',
+      source: 'Employer / payroll confirmation desk',
+      unitPriceKes: 30,
+      includedInBatch: 500,
+      overageRateKes: 30,
+      backupRateKes: 45,
+      turnaround: '2 – 24h (async)',
       confidence: 'Medium',
+      proposalGroup: 'Identity Verification APIs',
+      confirmedFromProposal: true,
     },
     {
-      id: 'kyc-criminal',
-      name: 'Criminal & Court Record Check',
+      id: 'kyc-face',
+      name: "'Face ID Match'",
       type: 'kyc',
-      description: 'Criminal case history, charge, court, filing date and outcome from judiciary records.',
-      source: 'Judiciary / Directorate of Criminal Investigations',
-      unitPriceKes: 250,
-      includedInBatch: 100,
-      overageRateKes: 290,
-      turnaround: '2 – 48h (async)',
-      confidence: 'Standard',
+      description: 'Liveness-checked facial comparison of a submitted selfie against the ID document photograph.',
+      source: 'IPRS photograph repository + biometric match engine',
+      unitPriceKes: 30,
+      includedInBatch: 500,
+      overageRateKes: 30,
+      backupRateKes: 45,
+      turnaround: 'Real-time (< 5s)',
+      confidence: 'High',
+      proposalGroup: 'Identity Verification APIs',
+      confirmedFromProposal: true,
+    },
+    {
+      id: 'kyc-bank',
+      name: "'Bank Account Verification'",
+      type: 'kyc',
+      description: 'Validates that a bank account number and holder name match an active account.',
+      source: 'Bank account verification network',
+      unitPriceKes: 30,
+      includedInBatch: 500,
+      overageRateKes: 30,
+      backupRateKes: 45,
+      turnaround: 'Real-time (< 5s)',
+      confidence: 'High',
+      proposalGroup: 'Identity Verification APIs',
+      confirmedFromProposal: true,
+    },
+
+    /* ---- Identity Verification APIs · KES 75 (no back-up rate quoted) ---- */
+    {
+      id: 'kyc-alien',
+      name: "'Alien ID Verification'",
+      type: 'kyc',
+      description: 'Verifies a foreign national against their alien ID / foreigner registration record.',
+      source: 'Directorate of Immigration Services',
+      unitPriceKes: 75,
+      includedInBatch: 500,
+      overageRateKes: 75,
+      turnaround: 'Real-time (< 5s)',
+      confidence: 'High',
+      proposalGroup: 'Identity Verification APIs',
+      confirmedFromProposal: true,
     },
     {
       id: 'kyc-pep',
-      name: 'PEP & Sanctions Screening',
+      name: "'AML & PEP Screen'",
       type: 'kyc',
-      description: 'Politically-exposed-person, UN/OFAC/EU sanctions and adverse-media screening.',
+      description: 'Screens the subject against politically-exposed-person, sanctions and adverse-media lists.',
       source: 'Global watchlist aggregator',
-      unitPriceKes: 120,
-      includedInBatch: 250,
-      overageRateKes: 140,
+      unitPriceKes: 75,
+      includedInBatch: 500,
+      overageRateKes: 75,
+      turnaround: 'Real-time (< 5s)',
+      confidence: 'High',
+      proposalGroup: 'Identity Verification APIs',
+      confirmedFromProposal: true,
+    },
+    {
+      id: 'kyc-passport',
+      name: "'Passport Check'",
+      type: 'kyc',
+      description: 'Validates passport number, holder name, issue and expiry against the issuing authority.',
+      source: 'Directorate of Immigration Services',
+      unitPriceKes: 75,
+      includedInBatch: 500,
+      overageRateKes: 75,
+      turnaround: 'Real-time (< 5s)',
+      confidence: 'High',
+      proposalGroup: 'Identity Verification APIs',
+      confirmedFromProposal: true,
+    },
+
+    /* ---- Utility & Compliance APIs · KES 20 ---- */
+    {
+      id: 'kyc-address',
+      name: "'KPLC Location Checker'",
+      type: 'kyc',
+      description: 'Confirms a declared physical address against the power utility connection point.',
+      source: 'Kenya Power (KPLC) connection register',
+      unitPriceKes: 20,
+      includedInBatch: 500,
+      overageRateKes: 20,
+      turnaround: 'Real-time (< 3s)',
+      confidence: 'Medium',
+      proposalGroup: 'Utility & Compliance APIs',
+      confirmedFromProposal: true,
+    },
+    {
+      id: 'kyc-kra',
+      name: "'KRA PIN Verification'",
+      type: 'kyc',
+      description: 'Validates a KRA PIN against the taxpayer register and returns the registered name and status.',
+      source: 'Kenya Revenue Authority',
+      unitPriceKes: 20,
+      includedInBatch: 500,
+      overageRateKes: 20,
       turnaround: 'Real-time (< 3s)',
       confidence: 'High',
+      proposalGroup: 'Utility & Compliance APIs',
+      confirmedFromProposal: true,
+    },
+    {
+      id: 'kyc-sim',
+      name: "'SIM Swap Check'",
+      type: 'kyc',
+      description: 'Detects whether the subject mobile number has had a SIM swap within the lookback window.',
+      source: 'Telecom SIM registry',
+      unitPriceKes: 20,
+      includedInBatch: 500,
+      overageRateKes: 20,
+      turnaround: 'Real-time (< 3s)',
+      confidence: 'High',
+      proposalGroup: 'Utility & Compliance APIs',
+      confirmedFromProposal: true,
+    },
+    {
+      id: 'kyc-namephone',
+      name: "'Search Name by Phone Number'",
+      type: 'kyc',
+      description: 'Returns the registered subscriber name for a given mobile number.',
+      source: 'Telecom SIM registry',
+      unitPriceKes: 20,
+      includedInBatch: 500,
+      overageRateKes: 20,
+      turnaround: 'Real-time (< 3s)',
+      confidence: 'Medium',
+      proposalGroup: 'Utility & Compliance APIs',
+      confirmedFromProposal: true,
+    },
+
+    /* ---- Identity & CRB APIs · KES 50 ---- */
+    {
+      id: 'kyc-phonebyid',
+      name: "'Search Phone Numbers by ID'",
+      type: 'kyc',
+      description: 'Returns the mobile numbers registered against a national ID number.',
+      source: 'CRB / telecom subscriber index',
+      unitPriceKes: 50,
+      includedInBatch: 500,
+      overageRateKes: 50,
+      turnaround: 'Real-time (< 5s)',
+      confidence: 'Medium',
+      proposalGroup: 'Identity & CRB APIs',
+      confirmedFromProposal: true,
+    },
+
+    /* ---- Spin Score · volume-banded, 1–1,000 band applies to this batch ---- */
+    {
+      id: 'kyc-crb',
+      name: "'Spin Score (Credit Score Only)'",
+      type: 'kyc',
+      description: 'Credit score only — no full bureau report. The proposal bands this 1–1,000 at KES 130, so the 0–500 batch falls inside that band.',
+      source: 'CRB (TransUnion) via Spin',
+      unitPriceKes: 130,
+      includedInBatch: 500,
+      overageRateKes: 130,
+      turnaround: 'Real-time (< 5s)',
+      confidence: 'High',
+      proposalGroup: 'Spin Score',
+      confirmedFromProposal: true,
+    },
+
+    /* ---- Page-metered ---- */
+    {
+      id: 'kyc-statement',
+      name: "'Scanned Statement Analysis'",
+      type: 'kyc',
+      description: 'Bank or mobile-money statement ingestion and analysis. Priced KES 120 base plus KES 4 per page; the base rate is shown here and the per-page component is metered at upload.',
+      source: 'Statement analysis engine',
+      unitPriceKes: 120,
+      includedInBatch: 500,
+      overageRateKes: 120,
+      perPageKes: 4,
+      turnaround: '5 – 60s per page',
+      confidence: 'Medium',
+      proposalGroup: 'Scanned Statement',
+      confirmedFromProposal: true,
+    },
+
+    /* ---- Vehicle Verification APIs · rate NOT received ---- */
+    {
+      id: 'kyc-vehicle',
+      name: "'Motor Vehicle Ownership'",
+      type: 'kyc',
+      description: 'Confirms registered ownership, logbook status and vehicle particulars against the national register.',
+      source: 'NTSA vehicle register',
+      unitPriceKes: 250,
+      includedInBatch: 500,
+      overageRateKes: 250,
+      turnaround: 'Real-time (< 5s)',
+      confidence: 'Medium',
+      proposalGroup: 'Vehicle Verification APIs',
+      confirmedFromProposal: false,
+    },
+
+    /* ---- Not covered by the received proposal extract ---- */
+    {
+      id: 'kyc-criminal',
+      name: "'Criminal & Court Record Check'",
+      type: 'kyc',
+      description: 'Searches criminal and civil court records for convictions and active proceedings.',
+      source: 'Judiciary Records',
+      unitPriceKes: 250,
+      includedInBatch: 500,
+      overageRateKes: 250,
+      turnaround: '2 – 24h (async)',
+      confidence: 'Medium',
+      proposalGroup: 'Not in received extract',
+      confirmedFromProposal: false,
     },
     {
       id: 'kyc-deceased',
-      name: 'Deceased Registry Check',
+      name: "'Deceased Registry Check'",
       type: 'kyc',
-      description: 'Confirms the subject is not recorded as deceased in the civil registry.',
-      source: 'IPRS deaths register',
+      description: 'Confirms whether a national ID number appears on the deceased register.',
+      source: 'IPRS / National Registration Bureau',
       unitPriceKes: 45,
       includedInBatch: 500,
-      overageRateKes: 52,
+      overageRateKes: 45,
       turnaround: 'Real-time (< 3s)',
       confidence: 'High',
+      proposalGroup: 'Not in received extract',
+      confirmedFromProposal: false,
     },
-
     /* ------------------------------- KYB line items ------------------------------- */
+    /*
+     * The proposal extract received covers the KYC / identity APIs only. It quotes NO
+     * KYB products, so every rate below is still a placeholder and is flagged as such.
+     */
     {
       id: 'kyb-registry',
       name: 'Company Registry Search',
@@ -156,6 +337,8 @@ export const pricingCatalog: PricingCatalog = {
       overageRateKes: 400,
       turnaround: '10 – 60s',
       confidence: 'High',
+      proposalGroup: 'Not in the received proposal extract',
+      confirmedFromProposal: false,
     },
     {
       id: 'kyb-directors',
@@ -168,6 +351,8 @@ export const pricingCatalog: PricingCatalog = {
       overageRateKes: 230,
       turnaround: '10 – 60s',
       confidence: 'High',
+      proposalGroup: 'Not in the received proposal extract',
+      confirmedFromProposal: false,
     },
     {
       id: 'kyb-bo',
@@ -180,6 +365,8 @@ export const pricingCatalog: PricingCatalog = {
       overageRateKes: 210,
       turnaround: '10 – 60s',
       confidence: 'Medium',
+      proposalGroup: 'Not in the received proposal extract',
+      confirmedFromProposal: false,
     },
     {
       id: 'kyb-tax',
@@ -192,6 +379,8 @@ export const pricingCatalog: PricingCatalog = {
       overageRateKes: 140,
       turnaround: 'Real-time (< 5s)',
       confidence: 'High',
+      proposalGroup: 'Not in the received proposal extract',
+      confirmedFromProposal: false,
     },
     {
       id: 'kyb-crb',
@@ -204,6 +393,8 @@ export const pricingCatalog: PricingCatalog = {
       overageRateKes: 1035,
       turnaround: '15 – 45s',
       confidence: 'High',
+      proposalGroup: 'Not in the received proposal extract',
+      confirmedFromProposal: false,
     },
     {
       id: 'kyb-litigation',
@@ -216,6 +407,8 @@ export const pricingCatalog: PricingCatalog = {
       overageRateKes: 345,
       turnaround: '2 – 24h (async)',
       confidence: 'Standard',
+      proposalGroup: 'Not in the received proposal extract',
+      confirmedFromProposal: false,
     },
     {
       id: 'kyb-licence',
@@ -228,6 +421,8 @@ export const pricingCatalog: PricingCatalog = {
       overageRateKes: 105,
       turnaround: '5 – 30s',
       confidence: 'Medium',
+      proposalGroup: 'Not in the received proposal extract',
+      confirmedFromProposal: false,
     },
   ],
 
@@ -238,14 +433,14 @@ export const pricingCatalog: PricingCatalog = {
       name: 'KYC Basic',
       tagline: 'Fast identity confirmation for onboarding and low-value accounts.',
       itemIds: ['kyc-id', 'kyc-kra', 'kyc-mpesa'],
-      priceKes: 105,
+      priceKes: 80,
     },
     {
       id: 'bundle-kyc-standard',
       name: 'KYC Standard',
       tagline: 'The default onboarding pack for lending, SACCO and fintech KYC.',
       itemIds: ['kyc-id', 'kyc-kra', 'kyc-mpesa', 'kyc-address', 'kyc-deceased'],
-      priceKes: 210,
+      priceKes: 145,
       highlighted: true,
       badge: 'Most Selected',
     },
@@ -254,27 +449,30 @@ export const pricingCatalog: PricingCatalog = {
       name: 'KYC Comprehensive',
       tagline: 'Full due diligence with credit, employment, criminal and screening.',
       itemIds: ['kyc-id', 'kyc-kra', 'kyc-mpesa', 'kyc-address', 'kyc-employer', 'kyc-criminal', 'kyc-pep', 'kyc-deceased', 'kyc-crb'],
-      priceKes: 1085,
+      priceKes: 630,
     },
     {
       id: 'bundle-kyb-essential',
       name: 'KYB Essential',
       tagline: 'Corporate onboarding: registry, directors and tax standing.',
       itemIds: ['kyb-registry', 'kyb-directors', 'kyb-tax'],
-      priceKes: 620,
+      priceKes: 670,
     },
     {
       id: 'bundle-kyb-complete',
       name: 'KYB Complete',
       tagline: 'Institutional-grade entity due diligence and ongoing monitoring.',
       itemIds: ['kyb-registry', 'kyb-directors', 'kyb-bo', 'kyb-tax', 'kyb-crb', 'kyb-litigation', 'kyb-licence'],
-      priceKes: 2040,
+      priceKes: 2140,
     },
   ],
 
   notes: [
     'All prices are quoted in Kenya Shillings (KES) and are exclusive of VAT at 16%.',
-    'Pricing applies to the 0–500 verification batch. Volumes above 500 are quoted separately.',
+    'Only the 0–500 verification batch is wired, per instruction. The proposal\u2019s higher bands (501–2,500, 2,501–5,000, …) are deliberately not used — note they are CHEAPER per unit, so volume is a discount rather than an overage.',
+    'The Identity Verification APIs carry a "Back Up Rate" (KES 45 against a KES 30 unit price) charged when the primary source cannot answer and the request falls back.',
+    'Spin Score is volume-banded 1–1,000 at KES 130; the 0–500 batch sits inside that band, so KES 130 applies.',
+    'Scanned Statement Analysis is page-metered: KES 120 base plus KES 4 per page.',
     'Per-check charges are debited from the prepaid wallet only on a successful (HTTP 200 + positive match) response. Timeouts and provider errors are not charged.',
     'Asynchronous checks (employer, criminal, litigation) are charged on submission; no further charge applies if the record is returned incomplete.',
     'The monthly platform access fee includes the API gateway, the analyst workspace, case management, report generation and standard support.',
@@ -442,4 +640,27 @@ export function priceChecks(itemIds: string[]): { total: number; breakdown: { id
     .filter(Boolean)
     .map((i) => ({ id: i!.id, name: i!.name, price: i!.unitPriceKes }));
   return { total: breakdown.reduce((a, b) => a + b.price, 0), breakdown };
+}
+
+/* ------------------------------ provenance helper ------------------------------ */
+
+/**
+ * Per-item provenance for the pricing banners.
+ *
+ * The catalogue-level `confirmedFromProposal` is deliberately all-or-nothing, so on its
+ * own it can only say "nothing is final". Once part of a proposal is transcribed that is
+ * misleading in both directions — it would hide the confirmed rates, or (if flipped true)
+ * silently present the unconfirmed ones as final. This counts the line items instead so
+ * every banner can state exactly what is and is not sourced from the proposal.
+ */
+export function pricingProvenance(catalog: PricingCatalog): {
+  total: number;
+  confirmed: number;
+  provisional: number;
+  allConfirmed: boolean;
+} {
+  const total = catalog.items.length;
+  const confirmed = catalog.items.filter((i) => i.confirmedFromProposal).length;
+  const provisional = total - confirmed;
+  return { total, confirmed, provisional, allConfirmed: provisional === 0 && catalog.confirmedFromProposal };
 }

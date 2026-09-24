@@ -8,7 +8,7 @@ import { useAppRouter } from '../../context/RouterContext';
 import { Badge, Button, Callout, Field, Panel, ResponsiveTable, SegmentedControl, Tabs, TextInput, Toggle, type Column } from '../ui';
 import { buildPricingSchedulePdf } from '../../lib/reports';
 import { downloadBlob, downloadText, KES, toCsv } from '../../lib/format';
-import { kycItems, kybItems } from '../../data/pricing';
+import { kycItems, kybItems, pricingProvenance } from '../../data/pricing';
 import type { PricedItem, PricingBundle } from '../../types';
 
 const TABS = ['Price list', 'Bundles', 'Calculator', 'Terms'] as const;
@@ -23,6 +23,7 @@ type Tab = (typeof TABS)[number];
  */
 export const Screen11_PricingTiers: React.FC = () => {
   const { pricing, can, updatePricing, settings, pushToast, subscriptionPlans, currentPlan, setCurrentPlan, billingPeriod, setBillingPeriod } = useAppData();
+  const prov = pricingProvenance(pricing);
   const { navigate } = useAppRouter();
   const [tab, setTab] = useState<Tab>('Price list');
   const [filter, setFilter] = useState<'all' | 'kyc' | 'kyb'>('all');
@@ -122,14 +123,16 @@ export const Screen11_PricingTiers: React.FC = () => {
         </div>
       </div>
 
-      {!pricing.confirmedFromProposal && (
+      {!prov.allConfirmed && (
         <div className="px-3 sm:px-4 pt-3">
-          <Callout tone="warning" title="Provisional rates — awaiting the proposal PDF" icon={<AlertTriangle size={14} />}>
+          <Callout tone="warning" title={`${prov.confirmed} of ${prov.total} rates confirmed from the proposal`} icon={<AlertTriangle size={14} />}>
             <p className="text-[11px] leading-relaxed">
-              These figures are placeholders built against <strong>{pricing.proposalRef}</strong>. Paste or attach{' '}
-              <em>KYC KYB Financial Proposal 2026.pdf</em> and the rates will be transcribed here;{' '}
-              {canEdit ? 'you can also edit any rate inline below and save.' : 'an Admin or Super Admin can edit them inline below.'} Setting{' '}
-              <code className="font-mono">confirmedFromProposal</code> removes this banner everywhere.
+              The KYC / identity API rates below are transcribed from <strong>{pricing.proposalRef}</strong> (batch {pricing.batchLabel}, VAT
+              exclusive). {prov.provisional} line items are still placeholders: the Vehicle Verification table arrived truncated, and the
+              extract quotes no criminal/deceased or KYB products. Each row states its own status.{' '}
+              {canEdit ? 'You can edit any rate inline below and save.' : 'An Admin or Super Admin can edit them inline below.'} Clearing this
+              banner everywhere needs every line confirmed plus{' '}
+              <code className="font-mono">confirmedFromProposal</code> set.
             </p>
           </Callout>
         </div>

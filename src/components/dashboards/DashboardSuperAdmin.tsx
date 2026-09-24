@@ -8,6 +8,7 @@ import { useAppRouter } from '../../context/RouterContext';
 import { Badge, Button, Callout, Panel, ProgressBar, ResponsiveTable, StatCard, type Column } from '../ui';
 import { settingsService } from '../../services/settings.service';
 import { KES, timeAgo } from '../../lib/format';
+import { pricingProvenance } from '../../data/pricing';
 import { PERMISSION_LABELS, ROLE_DEFINITIONS, SUB_ROLE_DEFINITIONS, TIER_META, TIER_ORDER, effectivePermissions } from '../../auth/permissions';
 import { getSnapshot } from '../../services/db';
 import type { SystemUser } from '../../types';
@@ -24,6 +25,7 @@ export const DashboardSuperAdmin: React.FC = () => {
     currentUser, users, payments, paymentStats, providerUsage, providers, audit, settings,
     settingsHealth, stats, apiMode, sessions, wallets, pricing, pushToast, can,
   } = useAppData();
+  const prov = pricingProvenance(pricing);
   const { navigate } = useAppRouter();
 
   const hour = new Date().getHours();
@@ -146,9 +148,10 @@ export const DashboardSuperAdmin: React.FC = () => {
           </Button>
         </Callout>
       )}
-      {!pricing.confirmedFromProposal && (
-        <Callout tone="warning" title="Pricing not yet confirmed from the proposal" icon={<Scale size={14} />}>
-          Rates are placeholders against <strong>{pricing.proposalRef}</strong>.{' '}
+      {!prov.allConfirmed && (
+        <Callout tone="warning" title={`Pricing: ${prov.confirmed} of ${prov.total} rates confirmed from the proposal`} icon={<Scale size={14} />}>
+          {prov.confirmed} line items are transcribed from <strong>{pricing.proposalRef}</strong>; {prov.provisional} remain
+          provisional placeholders.{' '}
           <Button size="xs" variant="secondary" className="ml-1" onClick={() => navigate('/pricing')}>Open pricing</Button>
         </Callout>
       )}

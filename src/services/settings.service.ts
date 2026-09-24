@@ -280,9 +280,19 @@ export const settingsService = {
 
     out.push({
       label: 'Pricing catalogue',
-      ok: s.pricing.confirmedFromProposal,
-      detail: s.pricing.confirmedFromProposal ? 'Figures confirmed against the 2026 financial proposal' : 'Provisional figures — transcribe the KYC/KYB Financial Proposal 2026 (batch 0–500)',
-      severity: s.pricing.confirmedFromProposal ? 'info' : 'warning',
+      ok: (() => {
+        const total = s.pricing.items.length;
+        const confirmed = s.pricing.items.filter((i) => i.confirmedFromProposal).length;
+        return confirmed === total && s.pricing.confirmedFromProposal;
+      })(),
+      detail: (() => {
+        const total = s.pricing.items.length;
+        const confirmed = s.pricing.items.filter((i) => i.confirmedFromProposal).length;
+        return confirmed === total
+          ? 'All rates confirmed against the 2026 financial proposal'
+          : `${confirmed} of ${total} rates confirmed from the proposal (batch 0–500); ${total - confirmed} still provisional`;
+      })(),
+      severity: s.pricing.items.every((i) => i.confirmedFromProposal) && s.pricing.confirmedFromProposal ? 'info' : 'warning',
     });
 
     out.push({
