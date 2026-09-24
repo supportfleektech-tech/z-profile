@@ -12,6 +12,7 @@
  * adapter does, so the audit trail is identical whichever transport is live.
  */
 
+import { effectivePermissions } from '../src/auth/permissions.ts';
 import express from 'express';
 import cors from 'cors';
 import crypto from 'node:crypto';
@@ -126,6 +127,56 @@ function actorOf(req) {
   return id ? findUser(String(id)) : null;
 }
 
+/* ────────────────────── authorisation helpers ──────────────────────
+ * The permission engine in src/auth/permissions.ts is the single source of truth
+ * (sub-roles, per-user overrides and scope implication included). These middlewares
+ * make the server enforce what the UI enforces — a stolen token or a hand-rolled
+ * request must not see more than the signed-in role allows.
+ */
+const canActor = (actor, perm) => !!actor && effectivePermissions(actor).has(perm);
+
+/** 401 without an actor, 403 without the permission; attaches req.actor. */
+const requirePerm = (perm) => (req, res, next) => {
+  const actor = actorOf(req);
+  if (!actor) return bad(res, 'Not authenticated.', 401);
+  if (!canActor(actor, perm)) return bad(res, `Your role does not permit this action (needs ${perm}).`, 403);
+  req.actor = actor;
+  next();
+};
+
+/** 401 without an actor; attaches req.actor. Use for own-scope reads. */
+const requireActor = (req, res, next) => {
+  const actor = actorOf(req);
+  if (!actor) return bad(res, 'Not authenticated.', 401);
+  req.actor = actor;
+  next();
+};
+
+/** The userId a request may address: user-tier actors may only address themselves. */
+const targetUserId = (req) => {
+  const actor = req.actor;
+  const q = req.query.userId ? String(req.query.userId) : null;
+  if (actor.tier !== 'user') return q;
+  if (q && q !== actor.id) return 'FORBIDDEN';
+  return actor.id;
+};
+
+/** Filter a list down to the actor's own rows for user-tier readers. */
+const ownOrAll = (req, rows, keys) => {
+  const actor = req.actor;
+  if (actor.tier !== 'user') return rows;
+  return rows.filter((r) => keys.some((k) => (r[k] ?? r.actorId) === actor.id));
+};
+
+/** For mutation routes carrying body.userId: a user-tier actor may only act on itself. */
+const requireSelfOrPrivileged = (req, res, next) => {
+  const actor = req.actor;
+  const uid = req.body?.userId ?? null;
+  if (actor.tier !== 'user' || !uid || uid === actor.id) return next();
+  return bad(res, 'You may only act on your own wallet.', 403);
+};
+
+
 const wrap = (fn) => (req, res) => {
   try {
     const out = fn(req, res);
@@ -169,7 +220,11 @@ function applyWalletMovement({ userId, amount, direction, kind, channel, status,
   const wallet = ensureWallet(userId);
   const user = findUser(userId);
   const delta = direction === 'credit' ? amount : -amount;
-  const balanceAfter = Math.round((wallet.balance + delta) * 100) / 100;
+  // A FAILED movement (declined card, expired push) records the attempt but moves no
+  // money — previously the delta was applied regardless of status, so a declined
+  // top-up CREDITED the wallet.
+  const applied = status === 'failed' ? 0 : delta;
+  const balanceAfter = Math.round((wallet.balance + applied) * 100) / 100;
 
   const transaction = {
     id: uid('wtx'), walletId: wallet.id, userId, userName: user?.name ?? 'Unknown', at: now(),
@@ -305,9 +360,9 @@ app.get('/api/auth/me', wrap((req, res) => {
 
 /* ---------------------------------- users --------------------------------- */
 
-app.get('/api/users', wrap((_req, res) => res.json(publicUsers(users()))));
+app.get('/api/users', requirePerm('users.view'), wrap((_req, res) => res.json(publicUsers(users()))));
 
-app.get('/api/users/:id', wrap((req, res) => {
+app.get('/api/users/:id', requirePerm('users.view'), wrap((req, res) => {
   const u = findUser(req.params.id);
   if (!u) return bad(res, 'Account not found.', 404);
   res.json(publicUser(u));
@@ -358,7 +413,7 @@ app.post('/api/users', wrap(async (req, res) => {
   res.status(201).json({ ok: true, user: publicUser(user) });
 }));
 
-app.patch('/api/users/:id', wrap((req, res) => {
+app.patch('/api/users/:id', requirePerm('users.edit'), wrap((req, res) => {
   const actor = actorOf(req);
   const target = findUser(req.params.id);
   if (!actor) return bad(res, 'Not authenticated.', 401);
@@ -394,7 +449,7 @@ app.patch('/api/users/:id', wrap((req, res) => {
   res.json({ ok: true, user: publicUser(next), message: 'Account updated.' });
 }));
 
-app.delete('/api/users/:id', wrap((req, res) => {
+app.delete('/api/users/:id', requirePerm('users.delete'), wrap((req, res) => {
   const actor = actorOf(req);
   const target = findUser(req.params.id);
   if (!actor) return bad(res, 'Not authenticated.', 401);
@@ -413,7 +468,7 @@ app.delete('/api/users/:id', wrap((req, res) => {
   res.json({ ok: true, message: `${target.name} removed.` });
 }));
 
-app.post('/api/users/:id/reset-password', wrap((req, res) => {
+app.post('/api/users/:id/reset-password', requirePerm('users.edit'), wrap((req, res) => {
   const actor = actorOf(req);
   const target = findUser(req.params.id);
   if (!actor) return bad(res, 'Not authenticated.', 401);
@@ -430,15 +485,19 @@ app.post('/api/users/:id/reset-password', wrap((req, res) => {
 
 /* --------------------------------- wallet --------------------------------- */
 
-app.get('/api/wallet', wrap((req, res) => {
-  const userId = req.query.userId ? String(req.query.userId) : null;
-  res.json(userId ? (walletFor(userId) ?? ensureWallet(userId)) : wallets());
+app.get('/api/wallet', requireActor, wrap((req, res) => {
+  const userId = targetUserId(req);
+  if (userId === 'FORBIDDEN') return bad(res, 'You may only read your own wallet.', 403);
+  if (userId) return res.json(walletFor(userId) ?? ensureWallet(userId));
+  // No explicit target: privileged tiers see every wallet, user tier sees its own only.
+  res.json(req.actor.tier !== 'user' ? wallets() : [walletFor(req.actor.id) ?? ensureWallet(req.actor.id)]);
 }));
 
-app.get('/api/wallet/transactions', wrap((req, res) => {
-  const userId = req.query.userId ? String(req.query.userId) : null;
+app.get('/api/wallet/transactions', requireActor, wrap((req, res) => {
+  const userId = targetUserId(req);
+  if (userId === 'FORBIDDEN') return bad(res, 'You may only read your own transactions.', 403);
   const limit = Math.min(Number(req.query.limit ?? 200), 1000);
-  res.json(transactions(userId, limit));
+  res.json(transactions(userId ?? (req.actor.tier !== 'user' ? null : req.actor.id), limit));
 }));
 
 app.patch('/api/wallet/:id', wrap((req, res) => {
@@ -458,7 +517,7 @@ app.patch('/api/wallet/:id', wrap((req, res) => {
 
 /* ---------------------------- M-PESA STK (Daraja) --------------------------- */
 
-app.post('/api/wallet/topup/mpesa/stk', wrap(async (req, res) => {
+app.post('/api/wallet/topup/mpesa/stk', requireActor, requireSelfOrPrivileged, wrap(async (req, res) => {
   const { userId, phone, amount } = req.body ?? {};
   const s = settings();
   const msisdn = normalizeMsisdn(phone);
@@ -538,7 +597,7 @@ app.post('/api/wallet/topup/mpesa/callback', wrap((req, res) => {
 }));
 
 /** Settle a dispatched STK into the wallet. */
-app.post('/api/wallet/topup/mpesa/confirm', wrap((req, res) => {
+app.post('/api/wallet/topup/mpesa/confirm', requireActor, wrap((req, res) => {
   const id = String(req.body?.checkoutRequestID ?? '');
   const actor = actorOf(req);
   const p = stkGet(id);
@@ -585,7 +644,7 @@ app.post('/api/wallet/topup/mpesa/confirm', wrap((req, res) => {
   });
 }));
 
-app.post('/api/wallet/topup/mpesa/cancel', wrap((req, res) => {
+app.post('/api/wallet/topup/mpesa/cancel', requireActor, requireSelfOrPrivileged, wrap((req, res) => {
   const id = String(req.body?.checkoutRequestID ?? '');
   const p = stkGet(id);
   if (!p) return bad(res, 'No pending STK request found.', 404);
@@ -599,7 +658,7 @@ app.post('/api/wallet/topup/mpesa/cancel', wrap((req, res) => {
 
 /* ---------------------------------- card ---------------------------------- */
 
-app.post('/api/wallet/topup/card', wrap(async (req, res) => {
+app.post('/api/wallet/topup/card', requireActor, requireSelfOrPrivileged, wrap(async (req, res) => {
   const { userId, amount, cardNumber, expiry, cvc, holder } = req.body ?? {};
   const s = settings();
   const digits = String(cardNumber ?? '').replace(/\s/g, '');
@@ -632,12 +691,13 @@ app.post('/api/wallet/topup/card', wrap(async (req, res) => {
   res.json({ ok: true, paymentIntentId, requires3ds: true, brand: cardBrand(digits) });
 }));
 
-app.post('/api/wallet/topup/card/confirm', wrap(async (req, res) => {
+app.post('/api/wallet/topup/card/confirm', requireActor, requireSelfOrPrivileged, wrap(async (req, res) => {
   const { userId, paymentIntentId, otp, amount, cardNumber, holder, expiry } = req.body ?? {};
   const actor = actorOf(req);
   const digits = String(cardNumber ?? '').replace(/\D/g, '');
   const brand = cardBrand(digits);
   const value = Math.round(Number(amount));
+  if (!Number.isFinite(value) || value <= 0) return bad(res, 'Enter a valid top-up amount.', 400);
   const code = String(otp ?? '').trim();
   const declined = code === '000000' || code.length !== 6;
   const reference = `CARD-${paymentIntentId}`;
@@ -687,7 +747,7 @@ app.post('/api/wallet/topup/card/confirm', wrap(async (req, res) => {
 
 /* -------------------------------- payments -------------------------------- */
 
-app.get('/api/payments', wrap((req, res) => {
+app.get('/api/payments', requirePerm('payments.view.all'), wrap((req, res) => {
   const q = req.query;
   res.json(payments({
     userId: q.userId ? String(q.userId) : undefined,
@@ -699,7 +759,7 @@ app.get('/api/payments', wrap((req, res) => {
   }));
 }));
 
-app.get('/api/payments/stats', wrap((_req, res) => {
+app.get('/api/payments/stats', requirePerm('payments.view.all'), wrap((_req, res) => {
   const all = payments({ limit: 5000 });
   const gross = all.filter((p) => p.status === 'success').reduce((a, p) => a + p.amount, 0);
   const fees = all.filter((p) => p.status === 'success').reduce((a, p) => a + (p.feeKes ?? 0), 0);
@@ -719,13 +779,13 @@ app.get('/api/payments/stats', wrap((_req, res) => {
   });
 }));
 
-app.get('/api/payments/:id', wrap((req, res) => {
+app.get('/api/payments/:id', requirePerm('payments.view.all'), wrap((req, res) => {
   const p = paymentById(req.params.id);
   if (!p) return bad(res, 'Payment not found.', 404);
   res.json(p);
 }));
 
-app.post('/api/payments/:id/refund', wrap((req, res) => {
+app.post('/api/payments/:id/refund', requirePerm('payments.refund'), wrap((req, res) => {
   const actor = actorOf(req);
   const p = paymentById(req.params.id);
   if (!p) return bad(res, 'Payment not found.', 404);
@@ -750,7 +810,7 @@ app.post('/api/payments/:id/refund', wrap((req, res) => {
   res.json({ ok: true, payment: refunded, transaction, message: `Refunded KES ${p.amount.toLocaleString('en-KE')}.` });
 }));
 
-app.post('/api/payments/:id/retry', wrap(async (req, res) => {
+app.post('/api/payments/:id/retry', requirePerm('payments.refund'), wrap(async (req, res) => {
   const actor = actorOf(req);
   const p = paymentById(req.params.id);
   if (!p) return bad(res, 'Payment not found.', 404);
@@ -779,19 +839,19 @@ app.post('/api/payments/:id/retry', wrap(async (req, res) => {
   res.json({ ok: succeeds, payment: retry, message: succeeds ? 'Retry succeeded and the wallet was credited.' : 'Retry failed again.' });
 }));
 
-app.get('/api/payment-methods', wrap((_req, res) => res.json(paymentMethods())));
+app.get('/api/payment-methods', requireActor, wrap((req, res) => res.json(ownOrAll(req, paymentMethods(), ['userId']))));
 
 /* -------------------------------- providers ------------------------------- */
 
-app.get('/api/providers', wrap((_req, res) => res.json(providers())));
+app.get('/api/providers', requirePerm('providers.view'), wrap((_req, res) => res.json(providers())));
 
-app.get('/api/providers/:id', wrap((req, res) => {
+app.get('/api/providers/:id', requirePerm('providers.view'), wrap((req, res) => {
   const p = providerById(req.params.id);
   if (!p) return bad(res, 'Provider not found.', 404);
   res.json(p);
 }));
 
-app.patch('/api/providers/:id', wrap((req, res) => {
+app.patch('/api/providers/:id', requirePerm('providers.configure'), wrap((req, res) => {
   const actor = actorOf(req);
   const current = providerById(req.params.id);
   if (!current) return bad(res, 'Provider not found.', 404);
@@ -809,7 +869,7 @@ app.patch('/api/providers/:id', wrap((req, res) => {
 }));
 
 /** Multi-stage gateway handshake modelled on a real provider test. */
-app.post('/api/providers/:id/test', wrap(async (req, res) => {
+app.post('/api/providers/:id/test', requirePerm('providers.test'), wrap(async (req, res) => {
   const actor = actorOf(req);
   const p = providerById(req.params.id);
   if (!p) return bad(res, 'Provider not found.', 404);
@@ -851,7 +911,7 @@ app.post('/api/providers/:id/test', wrap(async (req, res) => {
   res.json({ ok: passed, stages: results, latencyMs: latency, testedAt: next.lastTestAt, provider: next });
 }));
 
-app.get('/api/providers/:id/logs', wrap((req, res) => {
+app.get('/api/providers/:id/logs', requirePerm('provider.logs.view'), wrap((req, res) => {
   res.json(providerLogs(req.params.id, Math.min(Number(req.query.limit ?? 200), 1000)));
 }));
 
@@ -859,7 +919,7 @@ app.get('/api/provider-logs', wrap((req, res) => {
   res.json(providerLogs(null, Math.min(Number(req.query.limit ?? 200), 1000)));
 }));
 
-app.get('/api/api-keys', wrap((_req, res) => res.json(apiKeys())));
+app.get('/api/api-keys', requireActor, wrap((req, res) => res.json(ownOrAll(req, apiKeys(), ['userId']))));
 
 app.post('/api/api-keys/:id/revoke', wrap((req, res) => {
   const actor = actorOf(req);
@@ -877,11 +937,14 @@ app.post('/api/api-keys/:id/revoke', wrap((req, res) => {
 
 /* -------------------------------- settings -------------------------------- */
 
-app.get('/api/settings', wrap((_req, res) => res.json(settings())));
+app.get('/api/settings', requirePerm('settings.view'), wrap((_req, res) => res.json(settings())));
 
 app.patch('/api/settings/:group', wrap((req, res) => {
   const actor = actorOf(req);
+  if (!actor) return bad(res, 'Not authenticated.', 401);
   const group = req.params.group;
+  const needed = ['security', 'compliance', 'platform'].includes(group) ? `settings.edit.${group}` : 'settings.edit.operational';
+  if (!canActor(actor, needed)) return bad(res, `Your role cannot edit the ${group} settings group.`, 403);
   const current = settings();
   if (!current || !(group in current)) return bad(res, `Unknown settings group: ${group}`, 404);
   const before = current[group];
@@ -922,7 +985,7 @@ app.post('/api/settings/maintenance', wrap((req, res) => {
   res.json({ ok: true, settings: next });
 }));
 
-app.post('/api/settings/import', wrap((req, res) => {
+app.post('/api/settings/import', requirePerm('settings.edit.platform'), wrap((req, res) => {
   const actor = actorOf(req);
   const incoming = req.body?.settings ?? req.body;
   if (!incoming || typeof incoming !== 'object') return bad(res, 'No configuration payload supplied.');
@@ -944,7 +1007,7 @@ app.post('/api/settings/import', wrap((req, res) => {
 
 app.get('/api/pricing', wrap((_req, res) => res.json(pricing())));
 
-app.patch('/api/pricing', wrap((req, res) => {
+app.patch('/api/pricing', requirePerm('pricing.edit'), wrap((req, res) => {
   const actor = actorOf(req);
   const current = pricing();
   const patch = req.body ?? {};
@@ -961,7 +1024,7 @@ app.patch('/api/pricing', wrap((req, res) => {
 
 /* ------------------------------ audit/sessions ---------------------------- */
 
-app.get('/api/audit', wrap((req, res) => {
+app.get('/api/audit', requirePerm('audit.view'), wrap((req, res) => {
   const q = req.query;
   res.json(auditLog({
     severity: q.severity ? String(q.severity) : undefined,
@@ -973,9 +1036,9 @@ app.get('/api/audit', wrap((req, res) => {
   }));
 }));
 
-app.get('/api/sessions', wrap((_req, res) => res.json(sessions())));
+app.get('/api/sessions', requirePerm('sessions.view.all'), wrap((_req, res) => res.json(sessions())));
 
-app.delete('/api/sessions/:id', wrap((req, res) => {
+app.delete('/api/sessions/:id', requirePerm('sessions.revoke'), wrap((req, res) => {
   const actor = actorOf(req);
   const target = sessions().find((s) => s.id === req.params.id);
   if (!target) return bad(res, 'Session not found.', 404);
@@ -990,9 +1053,9 @@ app.delete('/api/sessions/:id', wrap((req, res) => {
 
 /* ---------------------------------- usage --------------------------------- */
 
-app.get('/api/usage', wrap((req, res) => res.json(usageRecords(Math.min(Number(req.query.limit ?? 500), 5000)))));
+app.get('/api/usage', requireActor, wrap((req, res) => res.json(ownOrAll(req, usageRecords(Math.min(Number(req.query.limit ?? 500), 5000)), ['userId']))));
 
-app.post('/api/usage', wrap((req, res) => {
+app.post('/api/usage', requireActor, wrap((req, res) => {
   const u = req.body ?? {};
   const record = {
     id: uid('use'), at: now(), userId: u.userId ?? 'system', userName: u.userName ?? 'System',
@@ -1006,10 +1069,10 @@ app.post('/api/usage', wrap((req, res) => {
 
 /* --------------------------- operational entities -------------------------- */
 
-app.get('/api/cases', wrap((_req, res) => res.json(cases())));
-app.get('/api/invoices', wrap((_req, res) => res.json(invoices())));
-app.get('/api/notifications', wrap((_req, res) => res.json(notifications())));
-app.get('/api/activities', wrap((_req, res) => res.json(activities())));
+app.get('/api/cases', requireActor, wrap((req, res) => res.json(ownOrAll(req, cases(), ['createdBy', 'assignedTo']))));
+app.get('/api/invoices', requirePerm('billing.view'), wrap((_req, res) => res.json(invoices())));
+app.get('/api/notifications', requireActor, wrap((req, res) => res.json(ownOrAll(req, notifications(), ['userId']))));
+app.get('/api/activities', requireActor, wrap((req, res) => res.json(ownOrAll(req, activities(), ['userId', 'actorId']))));
 
 /* ---------------------------------- meta ---------------------------------- */
 
