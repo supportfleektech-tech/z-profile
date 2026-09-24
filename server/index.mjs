@@ -1055,13 +1055,43 @@ app.patch('/api/pricing', requirePerm('pricing.edit'), wrap((req, res) => {
   const actor = actorOf(req);
   const current = pricing();
   const patch = req.body ?? {};
+  if (patch.vatRatePct !== undefined && (patch.vatRatePct < 0 || patch.vatRatePct > 40)) {
+    return bad(res, 'VAT rate must be between 0 and 40%.', 400);
+  }
+  if (patch.items) {
+    const badItem = patch.items.find((i) => i.unitPriceKes < 0 || i.overageRateKes < 0 || (i.backupRateKes ?? 0) < 0 || (i.perPageKes ?? 0) < 0);
+    if (badItem) return bad(res, `Rates for "${badItem.name}" cannot be negative.`, 400);
+  }
+  if (patch.bundles) {
+    const badBundle = patch.bundles.find((b) => b.priceKes < 0);
+    if (badBundle) return bad(res, `Bundle price for "${badBundle.name}" cannot be negative.`, 400);
+  }
   const next = { ...current, ...patch };
   if (patch.items) next.items = patch.items;
   savePricing(next);
+  // Audit with the exact old -> new movements per rate.
+  const changes = [];
+  if (patch.items) {
+    for (const ni of patch.items) {
+      const pi = (current.items ?? []).find((x) => x.id === ni.id);
+      if (!pi) continue;
+      for (const f of ['unitPriceKes', 'overageRateKes', 'backupRateKes', 'perPageKes']) {
+        if (pi[f] !== ni[f]) changes.push(`${ni.id} ${f} ${pi[f] ?? '—'}→${ni[f] ?? '—'}`);
+      }
+    }
+  }
+  if (patch.bundles) {
+    for (const nb of patch.bundles) {
+      const pb = (current.bundles ?? []).find((x) => x.id === nb.id);
+      if (pb && pb.priceKes !== nb.priceKes) changes.push(`${nb.id} price ${pb.priceKes}→${nb.priceKes}`);
+    }
+  }
   appendAudit({
     actorId: actor?.id ?? 'system', actorName: actor?.name ?? 'System', actorTier: actor?.tier ?? 'admin',
     action: 'pricing.updated', entity: 'PricingCatalog', severity: 'warning', ip: clientIp(req),
-    detail: `Pricing updated: ${Object.keys(patch).join(', ') || 'no fields'}`,
+    detail: changes.length
+      ? `Price adjustment — ${changes.slice(0, 12).join('; ')}${changes.length > 12 ? `; +${changes.length - 12} more` : ''}`
+      : `Pricing updated: ${Object.keys(patch).join(', ') || 'no fields'}`,
   });
   res.json({ ok: true, pricing: next });
 }));

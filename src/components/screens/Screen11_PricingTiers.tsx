@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import {
   Layers, Download, Calculator, Info, CheckCircle2, FileText, Save, RotateCcw, AlertTriangle,
-  Scale, Coins, ArrowRight,
+  Scale, Coins, ArrowRight, Pencil,
 } from 'lucide-react';
 import { useAppData } from '../../context/AppDataContext';
 import { useAppRouter } from '../../context/RouterContext';
-import { Badge, Button, Callout, Field, Panel, ResponsiveTable, SegmentedControl, Tabs, TextInput, Toggle, type Column } from '../ui';
+import { Badge, Button, Callout, Field, Modal, Panel, ResponsiveTable, SegmentedControl, Tabs, TextInput, Toggle, type Column } from '../ui';
 import { buildPricingSchedulePdf } from '../../lib/reports';
 import { downloadBlob, downloadText, KES, toCsv } from '../../lib/format';
 import { kycItems, kybItems, pricingProvenance } from '../../data/pricing';
@@ -27,13 +27,33 @@ export const Screen11_PricingTiers: React.FC = () => {
   const { navigate } = useAppRouter();
   const [tab, setTab] = useState<Tab>('Price list');
   const [filter, setFilter] = useState<'all' | 'kyc' | 'kyb'>('all');
-  const [draft, setDraft] = useState<Record<string, number>>({});
+  /** Field-level rate adjustments: unit / overage / backup / per-page / included quota. */
+  type RateDraft = { unit?: number; overage?: number; backup?: number | null; perPage?: number | null; included?: number };
+  const [draft, setDraft] = useState<Record<string, RateDraft>>({});
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [bundleDraft, setBundleDraft] = useState<Record<string, number>>({});
   const [volumes, setVolumes] = useState<Record<string, number>>({ 'kyc-id': 250, 'kyc-kra': 250, 'kyc-mpesa': 250 });
 
   const canEdit = can('pricing.edit');
   const items = useMemo(() => (filter === 'all' ? pricing.items : filter === 'kyc' ? kycItems() : kybItems()), [filter, pricing.items]);
 
-  const pendingEdits = Object.entries(draft).filter(([id, v]) => pricing.items.find((i) => i.id === id)?.unitPriceKes !== v);
+  /** Every field currently changed, counted across the table and the drawer. */
+  const pendingEdits = pricing.items.flatMap((i) => {
+    const d = draft[i.id];
+    if (!d) return [] as string[];
+    const out: string[] = [];
+    if (d.unit !== undefined && d.unit !== i.unitPriceKes) out.push(`${i.id}.unit`);
+    if (d.overage !== undefined && d.overage !== i.overageRateKes) out.push(`${i.id}.overage`);
+    if (d.backup !== undefined && (d.backup === null ? i.backupRateKes !== undefined : d.backup !== i.backupRateKes)) out.push(`${i.id}.backup`);
+    if (d.perPage !== undefined && (d.perPage === null ? i.perPageKes !== undefined : d.perPage !== i.perPageKes)) out.push(`${i.id}.perPage`);
+    if (d.included !== undefined && d.included !== i.includedInBatch) out.push(`${i.id}.included`);
+    return out;
+  });
+  const pendingBundleEdits = Object.entries(bundleDraft).filter(([id, v]) => pricing.bundles.find((b) => b.id === id)?.priceKes !== v);
+  const editing = editingId ? pricing.items.find((i) => i.id === editingId) ?? null : null;
+  const editingDraft = editingId ? draft[editingId] ?? {} : {};
+
+  const applyDraft = (id: string, patch: RateDraft) => setDraft((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
 
   const itemCols: Column<PricedItem>[] = [
     {
@@ -59,9 +79,9 @@ export const Screen11_PricingTiers: React.FC = () => {
         canEdit ? (
           <TextInput
             type="number"
-            value={draft[i.id] ?? i.unitPriceKes}
+            value={draft[i.id]?.unit ?? i.unitPriceKes}
             className="w-24 text-right font-mono py-1"
-            onChange={(e) => setDraft({ ...draft, [i.id]: Number(e.target.value) })}
+            onChange={(e) => applyDraft(i.id, { unit: Number(e.target.value) })}
           />
         ) : (
           <span className="font-mono text-emerald-300 font-semibold">{KES(i.unitPriceKes, { decimals: false })}</span>
@@ -69,9 +89,41 @@ export const Screen11_PricingTiers: React.FC = () => {
       renderMobile: (i) => <span className="font-mono text-emerald-300 font-semibold">{KES(i.unitPriceKes, { decimals: false })}</span>,
     },
     { key: 'included', header: 'Included in batch', align: 'right', render: (i) => <span className="font-mono text-[11px]">{i.includedInBatch.toLocaleString('en-KE')}</span>, className: 'hidden sm:table-cell', sortValue: (i) => i.includedInBatch },
-    { key: 'overage', header: 'Overage rate', align: 'right', render: (i) => <span className="font-mono text-[11px] text-slate-400">{KES(i.overageRateKes, { decimals: false })}</span>, className: 'hidden xl:table-cell', sortValue: (i) => i.overageRateKes },
+    {
+      key: 'overage',
+      header: canEdit ? 'Overage (KES)' : 'Overage rate',
+      align: 'right',
+      sortValue: (i) => i.overageRateKes,
+      render: (i) =>
+        canEdit ? (
+          <TextInput
+            type="number"
+            value={draft[i.id]?.overage ?? i.overageRateKes}
+            className="w-20 text-right font-mono py-1"
+            onChange={(e) => applyDraft(i.id, { overage: Number(e.target.value) })}
+          />
+        ) : (
+          <span className="font-mono text-[11px] text-slate-400">{KES(i.overageRateKes, { decimals: false })}</span>
+        ),
+      className: 'hidden xl:table-cell',
+    },
     { key: 'turnaround', header: 'Turnaround', render: (i) => <span className="text-[10px] text-slate-400">{i.turnaround}</span>, className: 'hidden lg:table-cell' },
     { key: 'confidence', header: 'Rate confidence', render: (i) => <Badge tone={i.confidence === 'High' ? 'success' : i.confidence === 'Medium' ? 'warning' : 'neutral'}>{i.confidence}</Badge>, className: 'hidden xl:table-cell', sortValue: (i) => i.confidence },
+    ...(canEdit
+      ? [
+          {
+            key: 'adjust',
+            header: 'Adjust',
+            align: 'right' as const,
+            render: (i: PricedItem) => (
+              <Button size="xs" variant="ghost" icon={<Pencil size={11} />} onClick={() => setEditingId(i.id)} aria-label={`Adjust rates for ${i.name}`}>
+                Edit
+              </Button>
+            ),
+            className: 'hidden md:table-cell',
+          },
+        ]
+      : []),
   ];
 
   // ------------------------------- calculator -------------------------------
@@ -130,7 +182,7 @@ export const Screen11_PricingTiers: React.FC = () => {
               The KYC / identity API rates below are transcribed from <strong>{pricing.proposalRef}</strong> (batch {pricing.batchLabel}, VAT
               exclusive). {prov.provisional} line items are still placeholders: the Vehicle Verification table arrived truncated, and the
               extract quotes no criminal/deceased or KYB products. Each row states its own status.{' '}
-              {canEdit ? 'You can edit any rate inline below and save.' : 'An Admin or Super Admin can edit them inline below.'} Clearing this
+              {canEdit ? 'You can adjust any rate inline or via the per-row Edit drawer, then save.' : 'The Super Admin can adjust these rates.'} Clearing this
               banner everywhere needs every line confirmed plus{' '}
               <code className="font-mono">confirmedFromProposal</code> set.
             </p>
@@ -179,18 +231,35 @@ export const Screen11_PricingTiers: React.FC = () => {
                   />
                   {canEdit && pendingEdits.length > 0 && (
                     <>
-                      <Button size="xs" variant="ghost" icon={<RotateCcw size={11} />} onClick={() => setDraft({})}>Discard</Button>
+                      <Button size="xs" variant="ghost" icon={<RotateCcw size={11} />} onClick={() => { setDraft({}); setEditingId(null); }}>Discard</Button>
                       <Button
                         size="xs"
                         variant="primary"
                         icon={<Save size={11} />}
                         onClick={async () => {
                           const res = await updatePricing({
-                            items: pricing.items.map((i) => (draft[i.id] != null ? { ...i, unitPriceKes: draft[i.id], confidence: 'High' as const } : i)),
+                            items: pricing.items.map((i) => {
+                              const d = draft[i.id];
+                              if (!d) return i;
+                              const next = { ...i };
+                              if (d.unit !== undefined) next.unitPriceKes = d.unit;
+                              if (d.overage !== undefined) next.overageRateKes = d.overage;
+                              if (d.backup !== undefined) {
+                                if (d.backup === null) delete next.backupRateKes;
+                                else next.backupRateKes = d.backup;
+                              }
+                              if (d.perPage !== undefined) {
+                                if (d.perPage === null) delete next.perPageKes;
+                                else next.perPageKes = d.perPage;
+                              }
+                              if (d.included !== undefined) next.includedInBatch = d.included;
+                              return next;
+                            }),
                           });
                           if (res.ok) {
                             setDraft({});
-                            pushToast({ title: 'Pricing saved', description: `${pendingEdits.length} rate(s) updated`, type: 'success' });
+                            setEditingId(null);
+                            pushToast({ title: 'Pricing saved', description: `${pendingEdits.length} rate field(s) updated — audited`, type: 'success' });
                           }
                         }}
                       >
@@ -220,6 +289,27 @@ export const Screen11_PricingTiers: React.FC = () => {
         {/* =============================== BUNDLES =============================== */}
         {tab === 'Bundles' && (
           <>
+            {canEdit && pendingBundleEdits.length > 0 && (
+              <div className="flex items-center justify-end gap-2 px-2 sm:px-4 pb-1">
+                <Button size="xs" variant="ghost" icon={<RotateCcw size={11} />} onClick={() => setBundleDraft({})}>Discard</Button>
+                <Button
+                  size="xs"
+                  variant="primary"
+                  icon={<Save size={11} />}
+                  onClick={async () => {
+                    const res = await updatePricing({
+                      bundles: pricing.bundles.map((b) => (bundleDraft[b.id] != null ? { ...b, priceKes: bundleDraft[b.id] } : b)),
+                    });
+                    if (res.ok) {
+                      setBundleDraft({});
+                      pushToast({ title: 'Bundle prices saved', description: `${pendingBundleEdits.length} bundle(s) updated — audited`, type: 'success' });
+                    }
+                  }}
+                >
+                  Save {pendingBundleEdits.length} bundle price{pendingBundleEdits.length > 1 ? 's' : ''}
+                </Button>
+              </div>
+            )}
             <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
               {pricing.bundles.map((b: PricingBundle) => {
                 const constituent = b.itemIds.reduce((a, id) => a + (pricing.items.find((i) => i.id === id)?.unitPriceKes ?? 0), 0);
@@ -234,7 +324,19 @@ export const Screen11_PricingTiers: React.FC = () => {
                       {b.badge && <Badge tone="accent">{b.badge}</Badge>}
                     </div>
                     <div className="flex items-baseline gap-2">
-                      <span className="text-xl font-black text-white font-mono">{KES(b.priceKes, { decimals: false })}</span>
+                      {canEdit ? (
+                        <div className="flex items-baseline gap-1.5">
+                          <TextInput
+                            type="number"
+                            value={bundleDraft[b.id] ?? b.priceKes}
+                            className="w-28 text-right font-mono text-sm font-black"
+                            onChange={(e) => setBundleDraft({ ...bundleDraft, [b.id]: Number(e.target.value) })}
+                          />
+                          <span className="text-[10px] text-slate-500">KES</span>
+                        </div>
+                      ) : (
+                        <span className="text-xl font-black text-white font-mono">{KES(b.priceKes, { decimals: false })}</span>
+                      )}
                       {saving > 0 && <span className="text-[10px] text-emerald-400 font-semibold">save {saving}%</span>}
                     </div>
                     <ul className="space-y-1 flex-1">
@@ -473,6 +575,51 @@ export const Screen11_PricingTiers: React.FC = () => {
           </div>
         )}
       </div>
+
+      {editing && canEdit && (
+        <Modal open onClose={() => setEditingId(null)} title={`Adjust rates — ${editing.name}`}>
+          <div className="space-y-3">
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Changes stage into the pending draft — commit them with <strong className="text-slate-300">Save changes</strong> on the Price list.
+              Every committed adjustment is audit-logged with its old and new value. Adjusting a rate here{' '}
+              <strong className="text-amber-400">does not</strong> mark it confirmed against the proposal.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Unit price (KES)">
+                <TextInput type="number" className="font-mono" value={editingDraft.unit ?? editing.unitPriceKes} onChange={(e) => applyDraft(editing.id, { unit: Number(e.target.value) })} />
+              </Field>
+              <Field label="Overage rate (KES)">
+                <TextInput type="number" className="font-mono" value={editingDraft.overage ?? editing.overageRateKes} onChange={(e) => applyDraft(editing.id, { overage: Number(e.target.value) })} />
+              </Field>
+              <Field label="Back-up rate (KES)" hint="Empty = no back-up rate">
+                <TextInput
+                  type="number"
+                  className="font-mono"
+                  value={editingDraft.backup === null ? '' : editingDraft.backup ?? editing.backupRateKes ?? ''}
+                  onChange={(e) => applyDraft(editing.id, { backup: e.target.value === '' ? null : Number(e.target.value) })}
+                />
+              </Field>
+              <Field label="Per page (KES)" hint="Empty = not page-metered">
+                <TextInput
+                  type="number"
+                  className="font-mono"
+                  value={editingDraft.perPage === null ? '' : editingDraft.perPage ?? editing.perPageKes ?? ''}
+                  onChange={(e) => applyDraft(editing.id, { perPage: e.target.value === '' ? null : Number(e.target.value) })}
+                />
+              </Field>
+              <Field label="Included in batch">
+                <TextInput type="number" className="font-mono" value={editingDraft.included ?? editing.includedInBatch} onChange={(e) => applyDraft(editing.id, { included: Number(e.target.value) })} />
+              </Field>
+              <div className="flex items-end">
+                <Badge tone={editing.confirmedFromProposal ? 'success' : 'warning'}>{editing.confirmedFromProposal ? 'Confirmed from proposal' : 'Provisional rate'}</Badge>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>Done</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

@@ -58,8 +58,8 @@ Production single-file bundle: `npm run build` → `dist/index.html`.
 ## Verify
 
 ```bash
-npm run verify     # typecheck + build + 247 assertions:
-                   #   API 63 · DOM 44 · write-flows 63 · requirement-traceability 77
+npm run verify     # typecheck + build + 261 assertions:
+                   #   API 70 · DOM 44 · write-flows 63 · requirement-traceability 84
 ```
 
 `scripts/smoke-requirements.mjs` maps every acceptance criterion from the original
@@ -86,6 +86,13 @@ schedule and backend seed all read it). The 0–500 batch is transcribed from th
 Financial Proposal 2026: **15 of 25** line items carry `confirmedFromProposal: true`;
 the Vehicle table arrived truncated and the extract quotes no criminal, deceased or KYB
 products, so those 10 stay flagged and every banner reports the exact split.
+
+**Price governance:** the Super Admin adjusts every rate live on **Pricing & Tiers** —
+per-item unit, overage, back-up and per-page rates plus bundle prices, via inline inputs
+and a per-row edit drawer. `pricing.edit` is deliberately Super-Admin-only (Admin holds
+`pricing.view`); every committed change is audit-logged with its old → new values and
+takes effect immediately across New Search, wallet debits, the PDF schedule and the
+backend (they all read this one catalogue).
 
 ## Docs
 

@@ -207,6 +207,27 @@ try {
   check('pricing: IPRS Standard is KES 30 with a KES 45 back-up rate', pricing.json?.items?.find((i) => i.id === 'kyc-id')?.unitPriceKes === 30 && pricing.json?.items?.find((i) => i.id === 'kyc-id')?.backupRateKes === 45);
   check('pricing: catalogue flag stays false while items are provisional', pricing.json?.confirmedFromProposal === false);
 
+  /* ---- super admin adjusts prices ---- */
+  const adjust = (items, unit, id = 'kyc-id') => items.map((i) => (i.id === id ? { ...i, unitPriceKes: unit } : i));
+  const origItems = pricing.json.items;
+  const adj = await req('PATCH', '/api/pricing', { items: adjust(origItems, 35) }, null, superTok);
+  check('pricing: SUPER ADMIN can adjust a rate', adj.status === 200, String(adj.status));
+  const reread = await req('GET', '/api/pricing');
+  check('pricing: adjusted rate persists (30 → 35)', reread.json?.items?.find((i) => i.id === 'kyc-id')?.unitPriceKes === 35);
+  const auditAfterAdj = await req('GET', '/api/audit', null, null, superTok);
+  const adjDetail = (Array.isArray(auditAfterAdj.json) ? auditAfterAdj.json : []).find((e) => e.action === 'pricing.updated')?.detail ?? '';
+  check('pricing: adjustment is audit-logged with old → new', /kyc-id unitPriceKes 30→35/.test(adjDetail), adjDetail.slice(0, 70));
+  const neg = await req('PATCH', '/api/pricing', { items: adjust(origItems, -5) }, null, superTok);
+  check('pricing: negative rate is rejected (400)', neg.status === 400);
+  // pricing.edit is deliberately Super-Admin-only: Admin holds pricing.view but not .edit.
+  const adminDeny = await req('PATCH', '/api/pricing', { bundles: pricing.json.bundles }, null, adminTok);
+  check('pricing: admin is DENIED rate adjustment (super admin only, by design)', adminDeny.status === 403, String(adminDeny.status));
+  const userDeny = await req('PATCH', '/api/pricing', { vatRatePct: 18 }, null, login.json.token);
+  check('pricing: user tier is denied rate adjustments', userDeny.status === 403, String(userDeny.status));
+  // restore the shipped figures so later reads see the proposal values
+  const restore = await req('PATCH', '/api/pricing', { items: origItems, bundles: pricing.json.bundles }, null, superTok);
+  check('pricing: rates restored to proposal figures', restore.status === 200 && (await req('GET', '/api/pricing')).json.items.find((i) => i.id === 'kyc-id').unitPriceKes === 30);
+
   /* ---- Spin Mobile module registry ---- */
   const spinMods = await req('GET', '/api/spin/modules', null, null, superTok);
   check('spin: module registry serves 21 documented Kenya modules', spinMods.json?.modules?.length === 21, String(spinMods.json?.modules?.length));

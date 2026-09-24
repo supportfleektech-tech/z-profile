@@ -13,11 +13,11 @@ seriously.
 
 ```bash
 npm run dev:all      # Express :8787 + Vite :5173 (Vite proxies /api → :8787)
-npm run verify       # typecheck + build + API(63) + DOM(44) + flows(63) + traceability(77)
+npm run verify       # typecheck + build + API(70) + DOM(44) + flows(63) + traceability(84)
 npm run db:reset     # wipe the backend SQLite (reseeds on next start)
 ```
 
-- `npm run verify` is **the** definition of done: 247 assertions. Never claim work is
+- `npm run verify` is **the** definition of done: 261 assertions. Never claim work is
   finished without it green.
 - `scripts/smoke-{api,dom,flows,requirements}.mjs` run against the **built bundle** or a
   live child server — they need `npm run build` first (verify handles the ordering).

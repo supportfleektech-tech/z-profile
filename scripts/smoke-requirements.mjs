@@ -290,6 +290,54 @@ const pass = (name, cond, detail = '') => check(name, cond, detail);
   pass('req9: super admin lands on its own tier dashboard (distinct landing)', /super/i.test(superA.$('main')?.textContent ?? ''), superA.$('main')?.textContent?.slice(0, 60).trim());
 }
 
+/* ════════════════════ Super Admin adjusts prices (Screen11) ════════════════════ */
+{
+  const app = bootApp();
+  await sleep(1600);
+  await loginAs(app, 'superadmin@iprs.co.ke');
+  await sleep(400);
+  await app.goto('/pricing');
+  await app.waitFor(() => /Unit price/.test(app.$('main')?.textContent ?? ''), { label: 'price list renders' });
+
+  const unitInputs = app.$$('input[type="number"]').filter((i) => i.closest('td, table'));
+  pass('pricing-ui: super admin gets editable rate inputs on the price list', unitInputs.length >= 25, `${unitInputs.length} inputs`);
+
+  // Open the per-row rate drawer.
+  const editBtn = app.findButtons('Edit')[0];
+  pass('pricing-ui: rows expose an Adjust/Edit action', !!editBtn);
+  app.click(editBtn);
+  await app.waitFor(() => !!app.dialog(), { label: 'drawer opens' });
+  const dlg = app.dialog();
+  const title = dlg.root.textContent ?? '';
+  // jsdom textContent has no boundaries, so resolve the item by matching a real catalogue name.
+  const itemName = (JSON.parse(app.window.localStorage.getItem(STORAGE_KEY) ?? '{}').pricing?.items ?? []).find((i) => title.includes(i.name))?.name ?? '';
+  pass('pricing-ui: drawer opens for the row', /Adjust rates/.test(title), itemName);
+  const fields = dlg.$$('input[type="number"]');
+  pass('pricing-ui: drawer exposes unit / overage / back-up / per-page / quota fields', fields.length >= 5, `${fields.length} fields`);
+
+  // Change the unit price, commit via the header Save button.
+  app.setInput(fields[0], '37');
+  await sleep(150);
+  const save = app.findButtonExact('Save 1 change');
+  pass('pricing-ui: pending change is counted and savable', !!save, save?.textContent?.trim());
+  const store = () => JSON.parse(app.window.localStorage.getItem(STORAGE_KEY) ?? '{}');
+  const rateOf = (nm) => store().pricing?.items?.find((i) => i.name === nm)?.unitPriceKes;
+  const before37 = rateOf(itemName);
+  if (save) { app.click(save); await app.waitFor(() => rateOf(itemName) !== before37, { label: 'price saved', timeout: 8000 }); }
+  pass('pricing-ui: adjusted rate persists to the store', rateOf(itemName) === 37, `${itemName}: ${before37} → ${rateOf(itemName)}`);
+
+  // Reset to the shipped figure so the suite is idempotent.
+  await app.goto('/pricing');
+  await app.waitFor(() => /Unit price/.test(app.$('main')?.textContent ?? ''), { label: 'price list re-renders' });
+  app.click(app.findButtons('Edit')[0]);
+  await app.waitFor(() => !!app.dialog(), { label: 'drawer re-opens' });
+  app.setInput(app.dialog().$$('input[type="number"]')[0], String(before37));
+  await sleep(150);
+  const save2 = app.findButtonExact('Save 1 change');
+  if (save2) { app.click(save2); await app.waitFor(() => rateOf(itemName) === before37, { label: 'price restored', timeout: 8000 }); }
+  pass('pricing-ui: rate restores cleanly (suite is idempotent)', rateOf(itemName) === before37, String(rateOf(itemName)));
+}
+
 /* ════════════════════ Pricing — proposal transcription visible ════════════════════ */
 {
   const prov = pricingProvenance(pricingCatalog);

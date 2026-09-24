@@ -192,15 +192,42 @@ export const settingsService = {
 
   async updatePricing(actor: SystemUser | null, patch: Partial<PricingCatalog>): Promise<{ ok: boolean; message?: string }> {
     const local = async () => {
-      if (!actor || !can(actor, 'pricing.edit')) return { ok: false, message: 'Only a Super Admin can edit the pricing catalogue.' };
+      if (!actor || !can(actor, 'pricing.edit')) return { ok: false, message: 'Only the Super Admin can adjust prices.' };
       if (patch.vatRatePct !== undefined && (patch.vatRatePct < 0 || patch.vatRatePct > 40)) {
         return { ok: false, message: 'VAT rate must be between 0 and 40%.' };
       }
       if (patch.items) {
-        const bad = patch.items.find((i) => i.unitPriceKes < 0);
-        if (bad) return { ok: false, message: `Unit price for "${bad.name}" cannot be negative.` };
+        const bad = patch.items.find((i) => i.unitPriceKes < 0 || i.overageRateKes < 0 || (i.backupRateKes ?? 0) < 0 || (i.perPageKes ?? 0) < 0);
+        if (bad) return { ok: false, message: `Rates for "${bad.name}" cannot be negative.` };
       }
+      if (patch.bundles) {
+        const badBundle = patch.bundles.find((b) => b.priceKes < 0);
+        if (badBundle) return { ok: false, message: `Bundle price for "${badBundle.name}" cannot be negative.` };
+      }
+      const before = getSnapshot().pricing;
       setState((prev) => ({ pricing: { ...prev.pricing, ...patch } }));
+      // Audit the exact old -> new movements, not just the touched keys.
+      const changes: string[] = [];
+      if (patch.items) {
+        for (const next of patch.items) {
+          const prev = before.items.find((i) => i.id === next.id);
+          if (!prev) continue;
+          for (const field of ['unitPriceKes', 'overageRateKes', 'backupRateKes', 'perPageKes'] as const) {
+            const was = prev[field];
+            const now = next[field];
+            if (was !== now) changes.push(`${next.id} ${field} ${was ?? '—'}→${now ?? '—'}`);
+          }
+        }
+      }
+      if (patch.bundles) {
+        for (const next of patch.bundles) {
+          const prev = before.bundles.find((b) => b.id === next.id);
+          if (prev && prev.priceKes !== next.priceKes) changes.push(`${next.id} price ${prev.priceKes}→${next.priceKes}`);
+        }
+      }
+      for (const key of ['vatRatePct', 'setupFeeKes', 'monthlyAccessFeeKes', 'batchLabel', 'confirmedFromProposal'] as const) {
+        if (patch[key] !== undefined && before[key] !== patch[key]) changes.push(`${key} ${String(before[key])}→${String(patch[key])}`);
+      }
       auditService.append({
         actorId: actor.id,
         actorName: actor.name,
@@ -209,7 +236,7 @@ export const settingsService = {
         entity: 'PricingCatalog',
         severity: 'critical',
         ip: actor.lastLoginIp ?? '0.0.0.0',
-        detail: `Pricing catalogue updated: ${Object.keys(patch).join(', ')}`,
+        detail: changes.length ? `Price adjustment — ${changes.slice(0, 12).join('; ')}${changes.length > 12 ? `; +${changes.length - 12} more` : ''}` : 'Pricing catalogue saved without changes',
       });
       return { ok: true, message: 'Pricing catalogue updated.' };
     };
