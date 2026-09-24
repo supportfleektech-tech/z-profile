@@ -13,11 +13,11 @@ seriously.
 
 ```bash
 npm run dev:all      # Express :8787 + Vite :5173 (Vite proxies /api → :8787)
-npm run verify       # typecheck + build + API(58) + DOM(44) + flows(63) + traceability(76)
+npm run verify       # typecheck + build + API(63) + DOM(44) + flows(63) + traceability(77)
 npm run db:reset     # wipe the backend SQLite (reseeds on next start)
 ```
 
-- `npm run verify` is **the** definition of done: 241 assertions. Never claim work is
+- `npm run verify` is **the** definition of done: 247 assertions. Never claim work is
   finished without it green.
 - `scripts/smoke-{api,dom,flows,requirements}.mjs` run against the **built bundle** or a
   live child server — they need `npm run build` first (verify handles the ordering).
@@ -54,6 +54,10 @@ npm run db:reset     # wipe the backend SQLite (reseeds on next start)
   disables. The frontend gets the token from `authService.login`, stores it in the
   workspace state (`authToken`), and `http.ts` sends `Authorization: Bearer` via the
   provider registered in AppDataContext. In LOCAL mode there is no token and no headers.
+- **Spin Mobile (searches)** — `src/data/spinModules.ts` is the transcribed Kenya module
+  registry (21 modules, `search_type`, endpoints, params, response shapes) that the UI,
+  `GET /api/spin/modules` and `server/spin.mjs` all read; review in
+  `docs/SPIN_INTEGRATION.md`. Same pattern as pricing: one file, many consumers.
 - **M-PESA gateway** — `server/daraja.mjs` swaps the STK simulation for the real Daraja
   API when `DARAJA_CONSUMER_KEY/SECRET/SHORTCODE/PASSKEY` are all set; health exposes
   `gateway.mode`. Live dispatch failures are honest 502s, never fabricated success.

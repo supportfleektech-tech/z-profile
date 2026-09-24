@@ -58,8 +58,8 @@ Production single-file bundle: `npm run build` → `dist/index.html`.
 ## Verify
 
 ```bash
-npm run verify     # typecheck + build + 241 assertions:
-                   #   API 58 · DOM 44 · write-flows 63 · requirement-traceability 76
+npm run verify     # typecheck + build + 247 assertions:
+                   #   API 63 · DOM 44 · write-flows 63 · requirement-traceability 77
 ```
 
 `scripts/smoke-requirements.mjs` maps every acceptance criterion from the original
@@ -67,6 +67,17 @@ brief (distinct profile tabs, Summary ≠ Full Report, settings that persist, pr
 config that saves, tier denials that deny, pricing provenance) to live assertions on
 the built bundle. `docs/MANUAL_TEST_CHECKLIST.md` covers the visual clicks no automated
 suite can perform.
+
+## Spin Mobile (Kenya) integration
+
+All 21 documented Kenya modules from docs.spinmobile.co are transcribed into
+`src/data/spinModules.ts`: the SuperCrunch auth contract (`POST /analytics/auth/`,
+consumer key + secret → ~10-minute bearer token), each module's `search_type`, endpoint,
+request/response parameters, and the priced item it delivers. The New Search catalogue
+badges every check with its real `search_type`; Provider Management shows the full module
+table; `GET /api/spin/modules` serves the registry; and `server/spin.mjs` executes live
+searches when `SPIN_CONSUMER_KEY`/`SPIN_CONSUMER_SECRET` are set (health reports the
+mode). Full review: `docs/SPIN_INTEGRATION.md`.
 
 ## Pricing
 
