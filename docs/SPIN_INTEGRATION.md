@@ -48,9 +48,11 @@ Legend: ✅ docs publish request+response details · ⚠️ docs section exists,
 | Criminal / Deceased | — | — | — | — | `kyc-criminal`, `kyc-deceased` | ❌ priced, not documented |
 
 **Resulting catalogue change:** 5 new priced items (`kyc-id-kra`, `kyc-fullkyc`,
-`kyc-metropol-full`, `kyc-creditinfo`, `kyc-driving-licence`) — all documented by Spin but
-**absent from the received proposal extract**, so they carry
-`confirmedFromProposal: false` and the banners now read **15 of 30 confirmed / 15 provisional**.
+`kyc-metropol-full`, `kyc-creditinfo`, `kyc-driving-licence`). The three quoted in the
+proposal (Metropol Full **300**, CreditInfo CRB Status **2,000**, Driver's Licence **200**)
+are transcribed verbatim; the two Spin-documented composites (`kyc-id-kra` **45**,
+`kyc-fullkyc` **200**) are keyed as platform-priced decisions — the catalogue is fully
+priced **34/34 confirmed** and the provisional banners have dropped.
 
 ## 3. Where each piece lives
 

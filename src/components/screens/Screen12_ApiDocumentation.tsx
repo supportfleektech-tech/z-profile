@@ -164,8 +164,7 @@ export const Screen12_ApiDocumentation: React.FC = () => {
   };
 
   const curl = `curl -X POST ${baseUrl}/wallet/topup/mpesa/stk \\
-  -H "Authorization: Bearer iprs_live_••••••••" \\
-  -H "x-user-id: ${currentUser?.id ?? 'u-analyst'}" \\
+  -H "Authorization: Bearer $SESSION_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{"userId":"${currentUser?.id ?? 'u-analyst'}","phone":"0712345678","amount":5000}'`;
 
@@ -236,7 +235,7 @@ export const Screen12_ApiDocumentation: React.FC = () => {
             <ul className="space-y-1.5 text-[11px] text-slate-400">
               {[
                 ['JSON everywhere', 'Requests and responses are application/json.'],
-                ['Actor header', 'x-user-id identifies the acting account on guarded routes.'],
+                ['Bearer session', 'Authorization: Bearer <session token> proves identity on guarded routes; invalid tokens get 401.'],
                 ['Redaction', 'No response ever includes a password; secrets are masked.'],
                 ['Business 4xx', '403 policy, 404 missing, 409 conflict — with a message.'],
                 ['Audit side-effect', 'Every mutation appends to /api/audit.'],
@@ -275,14 +274,14 @@ export const Screen12_ApiDocumentation: React.FC = () => {
         <div className="grid gap-4 lg:grid-cols-2">
           <Panel title="Bearer token" icon={<Key size={14} className="text-amber-400" />}>
             <div className="bg-[#050b14] p-3 rounded-lg border border-sky-900/60 font-mono text-[10px] sm:text-[11px] text-slate-300 overflow-x-auto">
-              <div className="text-slate-500">// Every request carries two headers:</div>
-              <div className="text-cyan-300 font-semibold break-all mt-1">Authorization: Bearer <span className="text-amber-400">iprs_live_••••••••••••9c41</span></div>
-              <div className="text-cyan-300 font-semibold break-all mt-1">x-user-id: <span className="text-emerald-400">{currentUser?.id ?? 'u-analyst'}</span></div>
+              <div className="text-slate-500">// Every guarded request carries exactly one identity header:</div>
+              <div className="text-cyan-300 font-semibold break-all mt-1">Authorization: Bearer <span className="text-emerald-400">&lt;session token from POST /api/auth/login&gt;</span></div>
             </div>
-            <Callout tone="info" title="Two-layer identity" icon={<ShieldCheck size={13} />} className="mt-3">
-              The bearer key authorises the <em>application</em>; <code className="font-mono">x-user-id</code> identifies the{' '}
-              <em>acting account</em> so role rules (who may create an Admin, who may toggle maintenance) are enforced
-              server-side, not just in the UI.
+            <Callout tone="info" title="Proven, not claimed" icon={<ShieldCheck size={13} />} className="mt-3">
+              Login issues an <strong>HMAC-signed session token</strong> bound to a live session row; the server resolves
+              the <em>acting account</em> from it, so role rules (who may create an Admin, who may toggle maintenance) are
+              enforced server-side, not just in the UI. The old forgeable <code className="font-mono">x-user-id</code>{' '}
+              header is retired — missing, invalid or expired tokens are rejected with <code className="font-mono">401</code>.
             </Callout>
           </Panel>
 
@@ -412,7 +411,7 @@ export const Screen12_ApiDocumentation: React.FC = () => {
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {[
                 ['400', 'Validation', '"Enter a valid Safaricom number, e.g. 0712 345 678."'],
-                ['401', 'Unauthenticated', '"Not authenticated." — missing or unknown x-user-id'],
+                ['401', 'Unauthenticated', '"Not authenticated." — missing, invalid or expired bearer token'],
                 ['403', 'Policy', '"Only a Super Admin can create Admin accounts."'],
                 ['409', 'Conflict', '"That payment has already been refunded."'],
               ].map(([code, kind, msg]) => (

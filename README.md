@@ -8,8 +8,8 @@ built to a **single self-contained HTML file**, backed by an optional Express +
 `node:sqlite` API the frontend transparently falls back from when it's down.
 
 > Demo-grade by design: seeded data, a simulated M-PESA gateway by default. The
-> permission engine, signed-session auth, payment state machine and 241-assertion
-> test gate are real.
+> permission engine, signed-session auth, scrypt-hashed passwords, payment state machine
+> and 270-assertion test gate are real.
 
 ## Security model
 

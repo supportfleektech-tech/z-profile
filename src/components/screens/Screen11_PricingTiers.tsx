@@ -181,8 +181,8 @@ export const Screen11_PricingTiers: React.FC = () => {
             <p className="text-[11px] leading-relaxed">
               The proposal has been received in full and the 0–500 batch is transcribed from{' '}
               <strong>{pricing.proposalRef}</strong> (VAT exclusive). {prov.confirmed} line items are confirmed against it. {prov.provisional} remain
-              placeholders — the proposal quotes no criminal/deceased, business-tax-compliance or CRB-business-report rates, and the two Spin-documented
-              composites (Identity+KRA, Full KYC) are not priced in it. Each row states its own status.{' '}
+              placeholders — each unconfirmed row states its own status and provenance group until an official quote is keyed. This
+              banner clears the moment every line is confirmed.{' '}
               {canEdit ? 'You can adjust any rate inline or via the per-row Edit drawer, then save.' : 'The Super Admin can adjust these rates.'} Clearing this
               banner everywhere needs every line confirmed plus{' '}
               <code className="font-mono">confirmedFromProposal</code> set.

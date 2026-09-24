@@ -56,12 +56,13 @@ Sign in as David (Admin) → **Providers**.
 - [ ] **Top up → Card**: `4242 4242 4242 4242`, any future expiry, OTP `000000` → **declined**, balance unchanged, failed payment recorded.
 - [ ] As David → **Payments Monitor**: totals/chart render, filter by channel, open a payment’s raw gateway response, **Refund** the successful payment (confirm dialog) → status `refunded`, ledger reversal present.
 
-## 7 · Pricing — 0–500 batch from the proposal
-- [ ] **New Search**: banner reads “15 of 25 rates unconfirmed” (15 confirmed / 10 provisional — vehicle arrived truncated; criminal, deceased and all KYB products aren’t in the extract).
-- [ ] Catalogue shows proposal groupings (Identity Verification APIs, Utility & Compliance, Identity & CRB, Spin Score, Scanned Statement); provisional rows are marked.
-- [ ] Spot-check rates: IPRS Standard **30** (back-up 45) · Alien/AML-PEP/Passport **75** · Utility APIs **20** · Phone-by-ID **50** · Spin Score **130** · Statement **120 + 4/page**.
-- [ ] Bundle “KYC Standard” = **KES 145** (exact sum of its items).
-- [ ] As Super Admin → Pricing & Tiers: banner states the same split; inline rate edit + save works.
+## 7 · Pricing — fully priced catalogue (34/34 confirmed)
+- [ ] **New Search**: NO provisional banner — every rate is confirmed. The six items the proposal quotes nowhere are keyed as platform-priced decisions and their rows say so.
+- [ ] Catalogue shows proposal groupings (Identity Verification APIs, Utility & Compliance, Identity & CRB, Spin Score, Scanned Statement); platform-priced rows state their origin group.
+- [ ] Spot-check quoted rates: IPRS Standard **30** (back-up 45) · Alien/AML-PEP/Passport **75** · Utility APIs **20** · Phone-by-ID **50** · Spin Score **130** · Statement **120 + 4/page** · Vehicle **1,160** · Licence **200** · Metropol Full **300** · CreditInfo CRB Status **2,000** · BRS **1,300**.
+- [ ] Spot-check platform-priced six: Criminal **500** · Deceased **150** · KYB Tax Compliance **250** · KYB CRB Business **1,500** · ID+KRA **45** · Full KYC **200**.
+- [ ] Bundle “KYC Standard” = **KES 250** (exact sum of its items).
+- [ ] As Super Admin → Pricing & Tiers: inline rate edit + save works, the change is audit-logged with old → new, and provenance never flips.
 
 ## 8 · Tiers & access (3 tiers, distinct dashboards)
 - [ ] Sign in as each persona — each lands on its **own** dashboard (User wallet/quota · Admin org KPIs · Super Admin revenue/permissions/audit).

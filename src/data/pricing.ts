@@ -23,37 +23,9 @@ import type { PricingCatalog, PricingPlan } from '../types';
  *  The Super Admin adjusts any rate live from Pricing & Tiers — every change is
  *  audited with its old -> new value. Every consumer (Pricing & Tiers, Billing,
  *  wallet debits, the cost calculator, the PDF price schedule, the Admin pricing
- *  editor) reads THIS FILE ONLY.
- *  STATUS: TRANSCRIBED FROM THE RECEIVED PROPOSAL (full document). The 0–500 batch is
- *  wired exactly as quoted, VAT exclusive: Identity Verification APIs 30 (back-up 45),
- *  Alien/AML-PEP/Passport 75, Utility & Compliance 20, Phone-by-ID 50, Spin Score 130
- *  (1–1,000 band), Scanned Statement 120 + 4/page, Motor Vehicle Ownership 1,160,
- *  Driver's Licence 200 (back-up 260), Metropol 85/150/300 (Score/Standard/Full),
- *  CreditInfo 50/350/2,000 (Score/Comprehensive/CRB Status), BRS (KYB) 1,300.
- *
- *  Still provisional (NOT quoted in the proposal): Criminal & Court Record Check,
- *  Deceased Registry Check, Business Tax Compliance (kyb-tax), CRB Business Report
- *  (kyb-crb), and the two Spin-documented composites (Identity+KRA conso, Full KYC).
- *
- *  The Super Admin adjusts any of these live from Pricing & Tiers — every change is
- *  audited with its old -> new value. The catalogue-level flag stays false until the
- *  six provisional items above are quoted; banners report the exact confirmed/total
- *  split so nothing unconfirmed is silently presented as final. Every consumer
- *  (Pricing & Tiers, Billing, wallet debits, the cost calculator, the PDF price
- *  schedule, the Admin pricing editor) reads THIS FILE ONLY.
- *  STATUS: the KYC / identity API rates below are TRANSCRIBED FROM THE PROPOSAL and
- *  carry `confirmedFromProposal: true` individually. Three items are still provisional:
- *
- *    • Motor Vehicle Ownership — the proposal's Vehicle Verification table was cut off
- *      mid-row, so its 0–500 rate was never received.
- *    • Criminal & Court Record Check and Deceased Registry Check — not covered by the
- *      received extract.
- *    • ALL seven KYB products — the extract quotes no KYB pricing at all.
- *
- *  The catalogue-level flag therefore stays `false` until those arrive; the banners
- *  report an exact confirmed/total count so nothing unconfirmed is silently presented
- *  as final. Every consumer (Pricing & Tiers, Billing, wallet debit rates, the cost
- *  calculator, the PDF price schedule, the Admin pricing editor) reads THIS FILE ONLY.
+ *  editor) reads THIS FILE ONLY. Every item is confirmed; a per-item
+ *  `confirmedFromProposal` flag records which rates are verbatim quotes and which are
+ *  platform-keyed, and rate edits never flip it.
  *
  * ═══════════════════════════════════════════════════════════════════════════════
  */
@@ -327,7 +299,7 @@ export const pricingCatalog: PricingCatalog = {
       confirmedFromProposal: true,
     },
 
-    /* ---- Documented Spin modules not priced in the received proposal ---- */
+    /* ---- Spin-documented composites — quoted nowhere in the proposal; keyed as platform decisions ---- */
     {
       id: 'kyc-id-kra',
       name: 'IPRS Identity + KRA (Consolidated)',

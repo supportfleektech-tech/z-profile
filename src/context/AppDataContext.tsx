@@ -27,7 +27,7 @@ import { walletService } from '../services/wallet.service';
 import { providerService } from '../services/provider.service';
 import { settingsService } from '../services/settings.service';
 import { searchService } from '../services/search.service';
-import { getApiMode, onApiModeChange, probeApi, setActorProvider, setAuthTokenProvider, type ApiMode } from '../services/http';
+import { getApiMode, onApiModeChange, probeApi, setAuthTokenProvider, type ApiMode } from '../services/http';
 import { can as canPermission, dashboardLabelFor, effectivePermissions, roleLabelFor } from '../auth/permissions';
 import { dossierToProfile } from '../data/dossier';
 import { subscriptionPlans } from '../data/pricing';
@@ -169,10 +169,10 @@ interface AppDataContextType {
 const AppDataContext = React.createContext<AppDataContextType | undefined>(undefined);
 
 /**
- * Tell the transport layer who is acting, so guarded backend routes can resolve the
- * actor from `x-user-id`. Registered at module scope — before the first render.
+ * Hand the transport layer the signed session token, so guarded backend routes can
+ * resolve the acting account from it. Registered at module scope — before the first
+ * render.
  */
-setActorProvider(() => getSnapshot().currentUserId);
 setAuthTokenProvider(() => getSnapshot().authToken);
 
 export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

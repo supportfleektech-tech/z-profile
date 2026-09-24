@@ -127,7 +127,7 @@ const maskCard = (digits) => {
   return d.length >= 4 ? `•••• •••• •••• ${d.slice(-4)}` : '•••• •••• •••• ••••';
 };
 
-/** Best-effort actor resolution from a bearer/`x-user-id` header. Demo only. */
+/** Actor resolution from the signed bearer token. Invalid tokens hard-reject. */
 function actorOf(req) {
   // Bearer token ONLY — signed, expiring, bound to a live session row (server/auth.mjs).
   // The forgeable x-user-id fallback is RETIRED: identity is proven, never claimed.

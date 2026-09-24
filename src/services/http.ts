@@ -58,30 +58,10 @@ export async function probeApi(timeoutMs = 1200): Promise<ApiMode> {
 }
 
 /**
- * Identity for guarded endpoints.
- *
- * The backend resolves the acting account from `x-user-id`. http.ts deliberately does
- * NOT import the store (that would couple transport to state), so the app registers a
- * provider once at boot — see AppDataContext.
- */
-let actorProvider: (() => string | null) | null = null;
-
-export function setActorProvider(fn: () => string | null): void {
-  actorProvider = fn;
-}
-
-export function currentActorId(): string | null {
-  try {
-    return actorProvider?.() ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Bearer token for authenticated calls (see server/auth.mjs — signed, expiring,
- * bound to a live session). As with the actor provider, http.ts stays decoupled from
- * the store: the app registers the provider once at boot.
+ * Identity for guarded endpoints: the signed bearer token (see server/auth.mjs —
+ * HMAC-signed, expiring, bound to a live session). http.ts deliberately does NOT
+ * import the store (that would couple transport to state), so the app registers a
+ * token provider once at boot — see AppDataContext.
  */
 let tokenProvider: (() => string | null) | null = null;
 
