@@ -13,11 +13,11 @@ seriously.
 
 ```bash
 npm run dev:all      # Express :8787 + Vite :5173 (Vite proxies /api → :8787)
-npm run verify       # typecheck + build + API(48) + DOM(44) + flows(63) + traceability(76)
+npm run verify       # typecheck + build + API(58) + DOM(44) + flows(63) + traceability(76)
 npm run db:reset     # wipe the backend SQLite (reseeds on next start)
 ```
 
-- `npm run verify` is **the** definition of done: 231 assertions. Never claim work is
+- `npm run verify` is **the** definition of done: 241 assertions. Never claim work is
   finished without it green.
 - `scripts/smoke-{api,dom,flows,requirements}.mjs` run against the **built bundle** or a
   live child server — they need `npm run build` first (verify handles the ordering).
@@ -46,8 +46,17 @@ npm run db:reset     # wipe the backend SQLite (reseeds on next start)
   no criminal/deceased/KYB products → those 10 stay flagged, catalogue-level flag stays
   `false` until all are confirmed). `pricingProvenance()` feeds every banner.
 - **Backend** — `server/index.mjs` (Express 5, `node:sqlite`, port 8787) seeds from the
-  same `src/data/*.ts` modules the browser mock uses, so the two cannot drift. Auth is
-  the `x-user-id` header (demo-grade by intent — real deployments need real sessions).
+  same `src/data/*.ts` modules the browser mock uses, so the two cannot drift.
+- **Auth** — login issues an HMAC-signed bearer token (`server/auth.mjs`) bound to a live
+  session row: logout revokes instantly; 12 h expiry; secret in the kv store or
+  `IPRS_AUTH_SECRET`. `actorOf()` trusts Bearer FIRST (invalid token = hard reject, never
+  a silent fallback) and only then the legacy `x-user-id` header, which `ALLOW_HEADER_AUTH=0`
+  disables. The frontend gets the token from `authService.login`, stores it in the
+  workspace state (`authToken`), and `http.ts` sends `Authorization: Bearer` via the
+  provider registered in AppDataContext. In LOCAL mode there is no token and no headers.
+- **M-PESA gateway** — `server/daraja.mjs` swaps the STK simulation for the real Daraja
+  API when `DARAJA_CONSUMER_KEY/SECRET/SHORTCODE/PASSKEY` are all set; health exposes
+  `gateway.mode`. Live dispatch failures are honest 502s, never fabricated success.
 - **Build** — `vite-plugin-singlefile`: everything inlines into one `dist/index.html`.
 
 ## Test harness gotchas (jsdom)

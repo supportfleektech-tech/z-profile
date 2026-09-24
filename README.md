@@ -7,8 +7,33 @@ genuinely different dashboards, tools and access. React 19 + Vite 7 + Tailwind 4
 built to a **single self-contained HTML file**, backed by an optional Express +
 `node:sqlite` API the frontend transparently falls back from when it's down.
 
-> Demo-grade by design: seeded data, simulated gateways, `x-user-id` header auth.
-> The permission engine, payment state machine and 231-assertion test gate are real.
+> Demo-grade by design: seeded data, a simulated M-PESA gateway by default. The
+> permission engine, signed-session auth, payment state machine and 241-assertion
+> test gate are real.
+
+## Security model
+
+- **Signed session tokens** — login issues an HMAC-SHA256 bearer token bound to a live
+  session row (logout revokes instantly, 12 h expiry, secret persisted per-database or
+  pinned via `IPRS_AUTH_SECRET`). The frontend stores it and sends `Authorization: Bearer`.
+- **Server-side RBAC** — every privileged route is guarded by the same
+  `effectivePermissions()` engine the UI uses; a hand-rolled request gets `401`/`403`.
+- **Legacy header fallback** — `ALLOW_HEADER_AUTH=1` (the default for demo convenience)
+  still accepts `x-user-id`, which anyone can forge. Set `ALLOW_HEADER_AUTH=0` to require
+  real tokens; `npm run verify` proves both modes.
+- Known demo shortcuts, honestly: plaintext seeded passwords, `x-user-id` fallback above,
+  and no TLS story. Replace all three before any real deployment.
+
+## Real M-PESA (Daraja) swap
+
+The wallet's STK simulation is replaced by the live Daraja API when these are set:
+
+```bash
+DARAJA_CONSUMER_KEY=… DARAJA_CONSUMER_SECRET=… DARAJA_SHORTCODE=…   DARAJA_PASSKEY=… DARAJA_ENV=sandbox   DARAJA_CALLBACK_URL=https://your-host/api/wallet/topup/mpesa/callback npm run server
+```
+
+`GET /api/health` reports `gateway: { mode, env, missing }`. In live mode a failed
+dispatch is a `502`, never a fabricated success; settlement arrives via the callback route.
 
 ## Run it
 
@@ -33,8 +58,8 @@ Production single-file bundle: `npm run build` → `dist/index.html`.
 ## Verify
 
 ```bash
-npm run verify     # typecheck + build + 231 assertions:
-                   #   API 48 · DOM 44 · write-flows 63 · requirement-traceability 76
+npm run verify     # typecheck + build + 241 assertions:
+                   #   API 58 · DOM 44 · write-flows 63 · requirement-traceability 76
 ```
 
 `scripts/smoke-requirements.mjs` maps every acceptance criterion from the original
