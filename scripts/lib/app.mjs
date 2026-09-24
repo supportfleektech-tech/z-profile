@@ -106,6 +106,21 @@ export function bootApp({ storage } = {}) {
    */
   window.eval(code);
 
+  /**
+   * React mounts asynchronously after the bundle evaluates (schedulers/microtasks),
+   * so "eval returned" ≠ "app mounted". `ready` resolves once #root has children
+   * (bounded); loginAs awaits it, turning every suite's fixed boot sleep into a
+   * floor instead of a race on slow runners.
+   */
+  const ready = new Promise((resolve) => {
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      const root = window.document.getElementById('root');
+      if (root && root.childElementCount > 0) { clearInterval(iv); resolve(true); }
+      else if (Date.now() - t0 > 30000) { clearInterval(iv); resolve(false); }
+    }, 50);
+  });
+
   /* ---- drive helpers ---- */
   const $ = (s) => window.document.querySelector(s);
   const $$ = (s) => [...window.document.querySelectorAll(s)];
@@ -191,13 +206,14 @@ export function bootApp({ storage } = {}) {
   /** A tab (role="tab") by exact label. */
   const findTab = (label) => $$('[role="tab"]').find((t) => (t.textContent ?? '').trim().toLowerCase().startsWith(label.toLowerCase()));
 
-  return { window, dom, errors, downloads, $, $$, text, buttons, findButton, findButtonExact, findButtons, findTab, inputs, findInput, setInput, click, goto, waitFor, errorCount, within, dialog };
+  return { window, dom, errors, downloads, ready, $, $$, text, buttons, findButton, findButtonExact, findButtons, findTab, inputs, findInput, setInput, click, goto, waitFor, errorCount, within, dialog };
 }
 
 /** Sign in a persona and clear any MFA step. Returns true on success. */
 export async function loginAs(app, email, password = DEMO_PASSWORD) {
-  // Cold runners can take longer than any fixed boot sleep to mount the login form,
-  // so wait for it (bounded) instead of trusting the caller's sleep.
+  // Wait for React to actually mount before touching the DOM (bounded), then for the
+  // login form. Cold runners can take longer than any fixed boot sleep.
+  await app.ready;
   await app.waitFor(() => !!app.$('input[type="password"]'), { timeout: 20000, label: 'login form' });
   const emailEl = app.findInput(/email/i) ?? app.$('input[type="email"]');
   const passEl = app.$('input[type="password"]');
