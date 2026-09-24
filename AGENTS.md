@@ -13,12 +13,12 @@ seriously.
 
 ```bash
 npm run dev:all      # Express :8787 + Vite :5173 (Vite proxies /api → :8787)
-npm run verify       # typecheck + build + API(70) + DOM(44) + flows(63) + traceability(84)
+npm run verify       # typecheck + build + API(77) + DOM(44) + flows(63) + traceability(85)
 npm run db:reset     # wipe the backend SQLite (reseeds on next start)
 ```
 
-- `npm run verify` is **the** definition of done: 261 assertions. Never claim work is
-  finished without it green.
+- `npm run verify` is **the** definition of done: 270 assertions (API 77 · DOM 44 ·
+  flows 64 · trace 85). Never claim work is finished without it green.
 - `scripts/smoke-{api,dom,flows,requirements}.mjs` run against the **built bundle** or a
   live child server — they need `npm run build` first (verify handles the ordering).
 - `node_modules` and `dist` can be wiped between sessions; `npm install && npm run build`
@@ -49,11 +49,14 @@ npm run db:reset     # wipe the backend SQLite (reseeds on next start)
   same `src/data/*.ts` modules the browser mock uses, so the two cannot drift.
 - **Auth** — login issues an HMAC-signed bearer token (`server/auth.mjs`) bound to a live
   session row: logout revokes instantly; 12 h expiry; secret in the kv store or
-  `IPRS_AUTH_SECRET`. `actorOf()` trusts Bearer FIRST (invalid token = hard reject, never
-  a silent fallback) and only then the legacy `x-user-id` header, which `ALLOW_HEADER_AUTH=0`
-  disables. The frontend gets the token from `authService.login`, stores it in the
-  workspace state (`authToken`), and `http.ts` sends `Authorization: Bearer` via the
-  provider registered in AppDataContext. In LOCAL mode there is no token and no headers.
+  `IPRS_AUTH_SECRET`. `actorOf()` is **bearer-only** — the forgeable `x-user-id`
+  fallback is retired, and a presented-but-invalid token is a hard reject. Passwords
+  are scrypt-hashed at rest (`server/passwords.mjs`): seeded plaintext is migrated at
+  boot (`hashStoredPasswords()`, idempotent), creation/resets hash on arrival, and
+  `publicUser` strips both plaintext and hash from every response. The frontend gets
+  the token from `authService.login`, stores it in workspace state (`authToken`), and
+  `http.ts` sends `Authorization: Bearer`; a 401 downgrades the session to LOCAL.
+  In LOCAL mode there is no token and no network calls.
 - **Spin Mobile (searches)** — `src/data/spinModules.ts` is the transcribed Kenya module
   registry (21 modules, `search_type`, endpoints, params, response shapes) that the UI,
   `GET /api/spin/modules` and `server/spin.mjs` all read; review in

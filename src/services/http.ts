@@ -112,10 +112,10 @@ async function request<T>(method: string, path: string, body?: unknown, timeoutM
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const actor = currentActorId();
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
-    if (actor) headers['x-user-id'] = actor;
+    // Identity is proven by the signed bearer token (server/auth.mjs) — the forgeable
+    // x-user-id header is retired and no longer sent.
     const token = currentToken();
     if (token) headers['Authorization'] = `Bearer ${token}`;
     const res = await fetch(path, {
@@ -176,7 +176,11 @@ export async function apiOr<T>(
       return { data, via: 'api' };
     } catch (err) {
       const status = err instanceof ApiError ? err.status : undefined;
-      const business = typeof status === 'number' && status >= 400 && status < 500;
+      // 401 means the session is dead (no/expired/revoked token) — the API can't serve
+      // this user anymore, so continue gracefully on the local adapter (chip → LOCAL).
+      // 4xx otherwise are business answers served locally WITHOUT downgrading.
+      if (status === 401) setMode('local');
+      const business = typeof status === 'number' && status >= 400 && status < 500 && status !== 401;
       if (!business) setMode('local');
     }
   }

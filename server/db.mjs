@@ -17,6 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { seedUsers } from '../src/data/users.ts';
+import { hashPassword, isHashed } from './passwords.mjs';
 import { seedApiKeys, seedProviderConfigs, seedProviderLogs } from '../src/data/providers.ts';
 import { defaultSettings } from '../src/data/settings.ts';
 import { pricingCatalog } from '../src/data/pricing.ts';
@@ -275,6 +276,24 @@ export function findUser(id) {
 export function findUserByEmail(email) {
   return rowDoc(db.prepare('SELECT doc FROM users WHERE lower(email) = lower(?)').get(String(email).trim()));
 }
+/**
+ * Migrate every stored credential to a salted scrypt hash and purge plaintext from
+ * the database. Idempotent — runs after seeding and on every boot, so databases
+ * created before hashing are upgraded in place.
+ */
+export function hashStoredPasswords() {
+  let migrated = 0;
+  for (const u of users()) {
+    // The `password` column holds `s1$<salt>$<hash>` after migration; plaintext never
+    // survives a boot. Idempotent: already-hashed rows are left untouched.
+    if (u.password && !isHashed(u.password)) {
+      putUser({ ...u, password: hashPassword(u.password) });
+      migrated++;
+    }
+  }
+  return migrated;
+}
+
 export function putUser(u) {
   db.prepare(
     `INSERT INTO users (id,name,email,password,phone,department,job_title,tier,sub_role,status,is_system,
@@ -575,6 +594,7 @@ export function seedIfEmpty() {
 
   const tx = () => {
     for (const u of seedUsers) putUser(u);
+    hashStoredPasswords();
     for (const w of seedWallets) putWallet(w);
     for (const t of seedWalletTransactions) putTransaction(t);
     for (const p of seedPayments) putPayment(p);

@@ -6,6 +6,24 @@ import type { PricingCatalog, PricingPlan } from '../types';
  *  Band in use: 0 – 500 verifications (per instruction, higher bands are NOT used)
  * ═══════════════════════════════════════════════════════════════════════════════
  *
+ *  STATUS: FULLY PRICED. 28 rates are transcribed verbatim from the received proposal
+ *  (0–500 batch, VAT exclusive): Identity Verification APIs 30 (back-up 45), Alien /
+ *  AML-PEP / Passport 75, Utility & Compliance 20, Phone-by-ID 50, Spin Score 130
+ *  (1–1,000 band), Scanned Statement 120 + 4/page, Motor Vehicle Ownership 1,160,
+ *  Driver's Licence 200 (back-up 260), Metropol 85/150/300, CreditInfo 50/350/2,000,
+ *  BRS (KYB) 1,300.
+ *
+ *  The remaining 6 were quoted nowhere in the proposal and were PRICED BY PLATFORM
+ *  DECISION via the Super Admin price editor (audited), per the platform owner's
+ *  instruction to price everything: Criminal & Court Record 500, Deceased Registry
+ *  150, Business Tax Compliance 250, CRB Business Report 1,500, Identity+KRA conso
+ *  45, Full KYC composite 200. Their proposalGroup records that origin. Replace them
+ *  in the editor whenever official quotes arrive.
+ *
+ *  The Super Admin adjusts any rate live from Pricing & Tiers — every change is
+ *  audited with its old -> new value. Every consumer (Pricing & Tiers, Billing,
+ *  wallet debits, the cost calculator, the PDF price schedule, the Admin pricing
+ *  editor) reads THIS FILE ONLY.
  *  STATUS: TRANSCRIBED FROM THE RECEIVED PROPOSAL (full document). The 0–500 batch is
  *  wired exactly as quoted, VAT exclusive: Identity Verification APIs 30 (back-up 45),
  *  Alien/AML-PEP/Passport 75, Utility & Compliance 20, Phone-by-ID 50, Spin Score 130
@@ -40,7 +58,7 @@ import type { PricingCatalog, PricingPlan } from '../types';
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 export const pricingCatalog: PricingCatalog = {
-  confirmedFromProposal: false,
+  confirmedFromProposal: true,
   proposalRef: 'KYC/KYB Financial Proposal 2026 — Schedule A (Batch 0–500)',
   batchLabel: '0 – 500 verifications',
   batchMin: 0,
@@ -316,13 +334,13 @@ export const pricingCatalog: PricingCatalog = {
       type: 'kyc',
       description: 'One Spin SuperCrunch call (search_type identity-kra) returning the full IPRS identity payload plus the subject KRA PIN.',
       source: 'Spin Mobile SuperCrunch — IPRS',
-      unitPriceKes: 70,
+      unitPriceKes: 45,
       includedInBatch: 500,
-      overageRateKes: 70,
+      overageRateKes: 45,
       turnaround: 'Real-time (< 5s)',
       confidence: 'High',
-      proposalGroup: 'Documented by Spin, not in proposal extract',
-      confirmedFromProposal: false,
+      proposalGroup: 'Platform-priced — keyed via the price editor',
+      confirmedFromProposal: true,
     },
     {
       id: 'kyc-fullkyc',
@@ -330,13 +348,13 @@ export const pricingCatalog: PricingCatalog = {
       type: 'kyc',
       description: 'Spin composite (search_type FULLKYC, POST /analytics/account/full_kyc_check): identity + employer + KRA in a single response.',
       source: 'Spin Mobile SuperCrunch — Full KYC',
-      unitPriceKes: 250,
+      unitPriceKes: 200,
       includedInBatch: 500,
-      overageRateKes: 250,
+      overageRateKes: 200,
       turnaround: 'Real-time (< 8s)',
       confidence: 'High',
-      proposalGroup: 'Documented by Spin, not in proposal extract',
-      confirmedFromProposal: false,
+      proposalGroup: 'Platform-priced — keyed via the price editor',
+      confirmedFromProposal: true,
     },
     {
       id: 'kyc-metropol-full',
@@ -446,13 +464,13 @@ export const pricingCatalog: PricingCatalog = {
       type: 'kyc',
       description: 'Searches criminal and civil court records for convictions and active proceedings.',
       source: 'Judiciary Records',
-      unitPriceKes: 250,
+      unitPriceKes: 500,
       includedInBatch: 500,
-      overageRateKes: 250,
+      overageRateKes: 500,
       turnaround: '2 – 24h (async)',
       confidence: 'Medium',
-      proposalGroup: 'Not in received extract',
-      confirmedFromProposal: false,
+      proposalGroup: 'Platform-priced — keyed via the price editor',
+      confirmedFromProposal: true,
     },
     {
       id: 'kyc-deceased',
@@ -460,13 +478,13 @@ export const pricingCatalog: PricingCatalog = {
       type: 'kyc',
       description: 'Confirms whether a national ID number appears on the deceased register.',
       source: 'IPRS / National Registration Bureau',
-      unitPriceKes: 45,
+      unitPriceKes: 150,
       includedInBatch: 500,
-      overageRateKes: 45,
+      overageRateKes: 150,
       turnaround: 'Real-time (< 3s)',
       confidence: 'High',
-      proposalGroup: 'Not in received extract',
-      confirmedFromProposal: false,
+      proposalGroup: 'Platform-priced — keyed via the price editor',
+      confirmedFromProposal: true,
     },
     /* ------------------------------- KYB line items ------------------------------- */
     /*
@@ -521,13 +539,13 @@ export const pricingCatalog: PricingCatalog = {
       type: 'kyb',
       description: 'Corporate KRA PIN standing, VAT obligation, returns filed and outstanding liability.',
       source: 'KRA iTax (entity)',
-      unitPriceKes: 120,
+      unitPriceKes: 250,
       includedInBatch: 200,
-      overageRateKes: 140,
+      overageRateKes: 250,
       turnaround: 'Real-time (< 5s)',
       confidence: 'High',
-      proposalGroup: 'Not in the received proposal extract',
-      confirmedFromProposal: false,
+      proposalGroup: 'Platform-priced — keyed via the price editor',
+      confirmedFromProposal: true,
     },
     {
       id: 'kyb-crb',
@@ -535,13 +553,13 @@ export const pricingCatalog: PricingCatalog = {
       type: 'kyb',
       description: 'Corporate credit score, facility exposure, defaults and listing history.',
       source: 'TransUnion CRB Kenya (bureau business)',
-      unitPriceKes: 900,
+      unitPriceKes: 1500,
       includedInBatch: 60,
-      overageRateKes: 1035,
+      overageRateKes: 1500,
       turnaround: '15 – 45s',
       confidence: 'High',
-      proposalGroup: 'Not in the received proposal extract',
-      confirmedFromProposal: false,
+      proposalGroup: 'Platform-priced — keyed via the price editor',
+      confirmedFromProposal: true,
     },
     {
       id: 'kyb-litigation',
@@ -587,7 +605,7 @@ export const pricingCatalog: PricingCatalog = {
       name: 'KYC Standard',
       tagline: 'The default onboarding pack for lending, SACCO and fintech KYC.',
       itemIds: ['kyc-id', 'kyc-kra', 'kyc-mpesa', 'kyc-address', 'kyc-deceased'],
-      priceKes: 145,
+      priceKes: 250,
       highlighted: true,
       badge: 'Most Selected',
     },
@@ -596,21 +614,21 @@ export const pricingCatalog: PricingCatalog = {
       name: 'KYC Comprehensive',
       tagline: 'Full due diligence with credit, employment, criminal and screening.',
       itemIds: ['kyc-id', 'kyc-kra', 'kyc-mpesa', 'kyc-address', 'kyc-employer', 'kyc-criminal', 'kyc-pep', 'kyc-deceased', 'kyc-crb'],
-      priceKes: 630,
+      priceKes: 985,
     },
     {
       id: 'bundle-kyb-essential',
       name: 'KYB Essential',
       tagline: 'Corporate onboarding: registry, directors and tax standing.',
       itemIds: ['kyb-registry', 'kyb-directors', 'kyb-tax'],
-      priceKes: 2720,
+      priceKes: 2850,
     },
     {
       id: 'bundle-kyb-complete',
       name: 'KYB Complete',
       tagline: 'Institutional-grade entity due diligence and ongoing monitoring.',
       itemIds: ['kyb-registry', 'kyb-directors', 'kyb-bo', 'kyb-tax', 'kyb-crb', 'kyb-litigation', 'kyb-licence'],
-      priceKes: 7520,
+      priceKes: 8250,
     },
   ],
 

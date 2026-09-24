@@ -342,8 +342,14 @@ const pass = (name, cond, detail = '') => check(name, cond, detail);
 {
   const prov = pricingProvenance(pricingCatalog);
   pass('pricing: catalogue covers the full proposal + documented Spin modules', prov.total === 34, `${prov.total} items`);
-  pass('pricing: 28 items confirmed from the received proposal', prov.confirmed === 28, `${prov.confirmed} confirmed`);
-  pass('pricing: 6 items remain flagged provisional', prov.provisional === 6, `${prov.provisional} provisional`);
+  pass('pricing: ALL 34 rates confirmed (28 proposal + 6 platform-priced)', prov.confirmed === 34 && prov.provisional === 0, `${prov.confirmed} confirmed / ${prov.provisional} provisional`);
+  pass('pricing: the 6 platform-priced rates are keyed in',
+    pricingCatalog.items.find((i) => i.id === 'kyc-criminal')?.unitPriceKes === 500 &&
+    pricingCatalog.items.find((i) => i.id === 'kyc-deceased')?.unitPriceKes === 150 &&
+    pricingCatalog.items.find((i) => i.id === 'kyb-tax')?.unitPriceKes === 250 &&
+    pricingCatalog.items.find((i) => i.id === 'kyb-crb')?.unitPriceKes === 1500 &&
+    pricingCatalog.items.find((i) => i.id === 'kyc-id-kra')?.unitPriceKes === 45 &&
+    pricingCatalog.items.find((i) => i.id === 'kyc-fullkyc')?.unitPriceKes === 200);
   const byId = (id) => pricingCatalog.items.find((i) => i.id === id);
   pass('pricing: vehicle 1,160 · driving licence 200/260 · Metropol 85/150/300 · CreditInfo 50/350/2,000 · BRS 1,300 — all confirmed',
     byId('kyc-vehicle')?.unitPriceKes === 1160 && byId('kyc-driving-licence')?.unitPriceKes === 200 && byId('kyc-driving-licence')?.backupRateKes === 260 &&
@@ -354,7 +360,7 @@ const pass = (name, cond, detail = '') => check(name, cond, detail);
     const unmapped = pricingCatalog.items.filter((i) => !spinModuleForItem(i.id) && !['kyc-criminal', 'kyc-deceased', 'kyc-vehicle', 'kyc-pep', 'kyc-statement', 'kyc-crb'].includes(i.id) && !i.id.startsWith('kyb-'));
     return unmapped.length === 0;
   })());
-  pass('pricing: catalogue flag stays false until the remainder arrive', pricingCatalog.confirmedFromProposal === false);
+  pass('pricing: catalogue master flag is TRUE — banners drop everywhere', pricingCatalog.confirmedFromProposal === true);
 
   const idItem = pricingCatalog.items.find((i) => i.id === 'kyc-id');
   pass('pricing: IPRS Standard = KES 30 / back-up 45 (proposal table 1)', idItem?.unitPriceKes === 30 && idItem?.backupRateKes === 45);
@@ -378,12 +384,13 @@ const pass = (name, cond, detail = '') => check(name, cond, detail);
   await sleep(1600);
   await loginAs(app, 'analyst@iprs.co.ke');
   await sleep(400);
+  // Fully priced: the provisional banners must be GONE from both screens.
   await app.goto('/search');
-  await app.waitFor(() => /provisional pricing/i.test(app.$('main')?.textContent ?? ''), { label: 'search banner' });
-  pass('pricing: New Search banner states the exact 28/34 split', /28 of 34 rates unconfirmed|28 rates are transcribed/.test(app.$('main')?.textContent ?? ''));
+  await app.waitFor(() => /Run verification|checks/i.test(app.$('main')?.textContent ?? ''), { label: 'search renders' });
+  pass('pricing: New Search no longer shows a provisional banner', !/provisional pricing/i.test(app.$('main')?.textContent ?? ''));
   await app.goto('/pricing');
-  await app.waitFor(() => /rates confirmed/i.test(app.$('main')?.textContent ?? ''), { label: 'pricing banner' });
-  pass('pricing: Pricing & Tiers banner states the exact split', /28 of 34 rates confirmed/.test(app.$('main')?.textContent ?? ''));
+  await app.waitFor(() => /Unit price/i.test(app.$('main')?.textContent ?? ''), { label: 'pricing renders' });
+  pass('pricing: Pricing & Tiers no longer shows a provisional banner', !/rates confirmed from the proposal\?|Provisional rates/i.test(app.$('main')?.textContent ?? '') && !/of 34 rates confirmed from the proposal/i.test(app.$('main')?.textContent ?? ''));
 }
 
 const fails = summarise('REQUIREMENT TRACEABILITY');

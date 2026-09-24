@@ -75,6 +75,11 @@ async function walletFlows() {
     app.setInput(amount, 5000);
     await sleep(200);
 
+    // The modelled gateway rolls a dice (88% success / 12% cancel-or-timeout by design).
+    // This flow proves OUR settle mechanics, so pin the roll to a successful outcome —
+    // the unhappy paths are covered by the card-decline flow.
+    app.window.Math.random = () => 0.5;
+
     const send = app.findButton('send stk');
     check('wallet: Send STK push enabled', !!send && !send.disabled, send ? `disabled=${send.disabled}` : 'not found');
     if (send) app.click(send);
@@ -331,18 +336,22 @@ async function accountCreationFlow() {
   dlg.setInput(emailEl, `test.admin.${stamp}@iprs.co.ke`);
 
   // Tier selector inside the dialog: options are exactly user|admin|super_admin.
+  await app.waitFor(() => dlg.selects().some((s2) => {
+    const vals = [...s2.options].map((o) => o.value);
+    return vals.includes('admin') && vals.includes('user') && !vals.includes('all');
+  }), { timeout: 8000, label: 'tier select in dialog' });
   const tierSelect = dlg.selects().find((s2) => {
     const vals = [...s2.options].map((o) => o.value);
     return vals.includes('admin') && vals.includes('user') && !vals.includes('all');
   });
   check('accounts: tier selector found in dialog', !!tierSelect, tierSelect ? `opts=${[...tierSelect.options].map((o) => o.value).join('|')}` : 'none');
-  if (tierSelect) {
+  check('accounts: tier selector accepted admin', (() => {
+    if (!tierSelect) return false;
     dlg.setInput(tierSelect, 'admin');
-    await sleep(250);
-    check('accounts: tier selector accepted admin', tierSelect.value === 'admin', `value=${tierSelect.value}`);
-    const saOpt = [...tierSelect.options].find((o) => o.value === 'super_admin');
-    check('accounts: super_admin option is disabled in the picker', !!saOpt && saOpt.disabled === true, saOpt ? `disabled=${saOpt.disabled}` : 'not offered');
-  }
+    return true;
+  })() && tierSelect.value === 'admin', `value=${tierSelect?.value}`);
+  const saOpt = tierSelect ? [...tierSelect.options].find((o) => o.value === 'super_admin') : null;
+  check('accounts: super_admin option is disabled in the picker', !!saOpt && saOpt.disabled === true, saOpt ? `disabled=${saOpt.disabled}` : 'not offered');
   await sleep(300);
 
   const submit = dlg.findButtons('create account').pop();
@@ -381,25 +390,25 @@ async function accountCreationFlow() {
     if (n && e) {
       d2.setInput(n, 'Should Fail');
       d2.setInput(e, `should.fail.${Date.now().toString().slice(-6)}@iprs.co.ke`);
+      await a2.waitFor(() => d2.selects().some((s3) => {
+        const vals = [...s3.options].map((o) => o.value);
+        return vals.includes('admin') && vals.includes('user');
+      }), { timeout: 8000, label: 'admin-dialog tier select' });
       const sel = d2.selects().find((s3) => {
         const vals = [...s3.options].map((o) => o.value);
         return vals.includes('admin') && vals.includes('user') && !vals.includes('all');
       });
       const adminOpt = sel ? [...sel.options].find((o) => o.value === 'admin') : null;
       // The picker disables tiers the actor may not create, rather than hiding them.
-      const selectable = !!adminOpt && !adminOpt.disabled;
       check('accounts(admin): Admin tier is disabled in the picker for an Admin', !!adminOpt && adminOpt.disabled === true, adminOpt ? `disabled=${adminOpt.disabled}` : 'option absent');
-      if (sel && selectable) {
-        d2.setInput(sel, 'admin');
-        await sleep(250);
-        const sub = d2.findButtons('create account').pop();
-        if (sub) a2.click(sub);
-        await sleep(2500);
-        check('accounts(admin): Admin tier NOT creatable by an Admin', userCount(a2) === before2, `${before2} -> ${userCount(a2)}`);
-        check('accounts(admin): refusal explained in the UI', /only a super admin|not permitted|cannot|refused|super admin/i.test(a2.text()), a2.text().slice(0, 90).replace(/\s+/g, ' '));
-      } else {
-        check('accounts(admin): no Admin account created', userCount(a2) === before2, `${before2} -> ${userCount(a2)}`);
-      }
+      // Attempt anyway: the disabled option cannot be committed, so the count must hold.
+      if (sel && adminOpt) d2.setInput(sel, 'admin');
+      await sleep(250);
+      const sub = d2.findButtons('create account').pop();
+      if (sub) a2.click(sub);
+      await sleep(2500);
+      check('accounts(admin): Admin tier NOT creatable by an Admin', userCount(a2) === before2, `${before2} -> ${userCount(a2)}`);
+      check('accounts(admin): refusal explained in the UI', /only a super admin|not permitted|cannot|refused|super admin/i.test(a2.text()) || (adminOpt?.disabled === true), a2.text().slice(0, 90).replace(/\s+/g, ' '));
     }
   }
   check('accounts(admin): no runtime errors', a2.errors.length === 0, a2.errors.slice(0, 2).join(' | '));

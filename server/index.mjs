@@ -16,6 +16,8 @@ import { effectivePermissions } from '../src/auth/permissions.ts';
 import { bearerOf, issueToken, verifyToken } from './auth.mjs';
 import * as daraja from './daraja.mjs';
 import * as spin from './spin.mjs';
+import { hashPassword, verifyPassword } from './passwords.mjs';
+import { hashStoredPasswords } from './db.mjs';
 import { SPIN_MODULES, SPIN_AUTH } from '../src/data/spinModules.ts';
 import express from 'express';
 import cors from 'cors';
@@ -59,7 +61,7 @@ app.use(express.json({ limit: '2mb' }));
  */
 function publicUser(u) {
   if (!u) return u;
-  const { password: _password, ...rest } = u;
+  const { password: _password, passwordHash: _hash, ...rest } = u;
   return rest;
 }
 const publicUsers = (list) => (Array.isArray(list) ? list.map(publicUser) : list);
@@ -127,22 +129,13 @@ const maskCard = (digits) => {
 
 /** Best-effort actor resolution from a bearer/`x-user-id` header. Demo only. */
 function actorOf(req) {
-  // 1) Bearer token — signed, expiring, bound to a live session row (see server/auth.mjs).
+  // Bearer token ONLY — signed, expiring, bound to a live session row (server/auth.mjs).
+  // The forgeable x-user-id fallback is RETIRED: identity is proven, never claimed.
   const bearer = bearerOf(req);
-  if (bearer) {
-    const verdict = verifyToken(bearer);
-    if (verdict.ok) return findUser(verdict.uid) ?? null;
-    // A presented-but-invalid token is a hard reject: never silently fall back from it.
-    return null;
-  }
-  // 2) Legacy identity header — DEMO CONVENIENCE ONLY. It makes the seeded accounts
-  //    curl-friendly, but anyone can claim any id with it. Set ALLOW_HEADER_AUTH=0
-  //    to require real tokens (the browser app always sends a token when it has one).
-  if ((process.env.ALLOW_HEADER_AUTH ?? '1') !== '0') {
-    const id = req.headers['x-user-id'] ?? req.body?.actorId ?? null;
-    return id ? findUser(String(id)) : null;
-  }
-  return null;
+  if (!bearer) return null;
+  const verdict = verifyToken(bearer);
+  // A presented-but-invalid token is a hard reject (never a silent anything).
+  return verdict.ok ? findUser(verdict.uid) ?? null : null;
 }
 
 /* ────────────────────── authorisation helpers ──────────────────────
@@ -319,7 +312,7 @@ app.post('/api/auth/login', wrap(async (req, res) => {
   if (user.status !== 'Active') {
     return res.status(403).json({ ok: false, reason: 'inactive', message: `This account is ${user.status.toLowerCase()}. Contact your administrator.` });
   }
-  if (user.password !== password) {
+  if (!verifyPassword(password, user.password)) {
     const attempts = (user.failedLoginAttempts ?? 0) + 1;
     const s = settings();
     const max = s.security?.lockoutThreshold ?? 5;
@@ -413,7 +406,7 @@ app.post('/api/users', wrap(async (req, res) => {
   const walletId = uid('wal');
   const user = {
     id: uid('usr'), name: input.name.trim(), email: input.email.trim().toLowerCase(),
-    password: input.password || 'ChangeMe@123', phone: input.phone ?? '', department: input.department ?? '',
+    password: hashPassword(input.password || 'ChangeMe@123'), phone: input.phone ?? '', department: input.department ?? '',
     jobTitle: input.jobTitle ?? '', tier: input.tier ?? 'user', subRole: input.subRole ?? 'analyst',
     status: 'Active', isSystem: false,
     mfaEnabled: (s.security?.mfaRequiredFor ?? []).includes(input.tier ?? 'user'),
@@ -495,7 +488,7 @@ app.post('/api/users/:id/reset-password', requirePerm('users.edit'), wrap((req, 
   if (!actor) return bad(res, 'Not authenticated.', 401);
   if (!target) return bad(res, 'Account not found.', 404);
   const temp = `Iprs@${crypto.randomInt(1000, 9999)}`;
-  putUser({ ...target, password: temp, failedLoginAttempts: 0, lockedUntil: null });
+  putUser({ ...target, password: hashPassword(temp), failedLoginAttempts: 0, lockedUntil: null });
   appendAudit({
     actorId: actor.id, actorName: actor.name, actorTier: actor.tier, action: 'user.password.reset',
     entity: 'SystemUser', entityId: target.id, severity: 'critical', ip: clientIp(req),
@@ -1184,6 +1177,7 @@ app.use('/api', (_req, res) => res.status(404).json({ ok: false, message: 'Unkno
 /* -------------------------------------------------------------------------- */
 
 const seedResult = seedIfEmpty();
+hashStoredPasswords(); // purge any plaintext credentials (idempotent; upgrades pre-hash DBs)
 if (seedResult.seeded) {
   console.log(`[api] seeded SQLite at ${DB_PATH}`, seedResult.counts);
 } else {

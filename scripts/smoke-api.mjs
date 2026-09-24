@@ -87,12 +87,12 @@ try {
   const login = await req('POST', '/api/auth/login', { email: 'analyst@iprs.co.ke', password: 'Iprs@2026!' });
   check('auth: correct credentials accepted', login.status === 200 && login.json?.user?.email === 'analyst@iprs.co.ke');
   check('auth: response leaks no password material', !JSON.stringify(login.json).match(/"password(hash)?"/i));
-  const me = await req('GET', '/api/auth/me', null, login.json.user.id);
-  check('auth: x-user-id session resolves the actor (demo fallback)', me.json?.user?.id === login.json.user.id);
   bearer = login.json?.token ?? null;
   check('auth: login issues a signed bearer token', typeof bearer === 'string' && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(bearer ?? ''), String(bearer?.slice(0, 24)));
   const meTok = await req('GET', '/api/auth/me');
-  check('auth: bearer token resolves the actor (no identity header)', meTok.json?.user?.id === login.json.user.id);
+  check('auth: bearer token resolves the actor', meTok.json?.user?.id === login.json.user.id);
+  const headerTry = await req('GET', '/api/auth/me', null, login.json.user.id, null);
+  check('auth: a bare x-user-id header alone is RETIRED (401)', headerTry.status === 401, String(headerTry.status));
   const tampered = await req('GET', '/api/auth/me', null, null, `${bearer.slice(0, -4)}AAAA`);
   check('auth: tampered token is rejected', tampered.status === 401);
   const garbage = await req('GET', '/api/auth/me', null, null, 'garbage.payload');
@@ -202,11 +202,16 @@ try {
 
   /* ---- pricing: the transcribed proposal ---- */
   const pricing = await req('GET', '/api/pricing');
-  check('pricing: catalogue serves 34 line items', pricing.json?.items?.length === 34, String(pricing.json?.items?.length));
-  check('pricing: 28 items carry confirmedFromProposal', pricing.json?.items?.filter((i) => i.confirmedFromProposal).length === 28);
-  check('pricing: IPRS Standard is KES 30 with a KES 45 back-up rate', pricing.json?.items?.find((i) => i.id === 'kyc-id')?.unitPriceKes === 30 && pricing.json?.items?.find((i) => i.id === 'kyc-id')?.backupRateKes === 45);
-  check('pricing: catalogue flag stays false while items are provisional', pricing.json?.confirmedFromProposal === false);
   const byId = (id) => pricing.json?.items?.find((i) => i.id === id);
+  check('pricing: catalogue serves 34 line items', pricing.json?.items?.length === 34, String(pricing.json?.items?.length));
+  check('pricing: ALL 34 items carry confirmedFromProposal', pricing.json?.items?.filter((i) => i.confirmedFromProposal).length === 34);
+  check('pricing: IPRS Standard is KES 30 with a KES 45 back-up rate', pricing.json?.items?.find((i) => i.id === 'kyc-id')?.unitPriceKes === 30 && pricing.json?.items?.find((i) => i.id === 'kyc-id')?.backupRateKes === 45);
+  check('pricing: catalogue master flag is TRUE (fully priced)', pricing.json?.confirmedFromProposal === true);
+  check('pricing: the 6 platform-priced items carry their keyed rates',
+    byId('kyc-criminal')?.unitPriceKes === 500 && byId('kyc-deceased')?.unitPriceKes === 150 && byId('kyb-tax')?.unitPriceKes === 250 &&
+    byId('kyb-crb')?.unitPriceKes === 1500 && byId('kyc-id-kra')?.unitPriceKes === 45 && byId('kyc-fullkyc')?.unitPriceKes === 200);
+  check('pricing: platform-priced items declare their origin in proposalGroup',
+    byId('kyc-criminal')?.proposalGroup?.startsWith('Platform-priced') === true);
   check('pricing: vehicle KES 1,160 and driving licence 200/260 (proposal 0–500)', byId('kyc-vehicle')?.unitPriceKes === 1160 && byId('kyc-driving-licence')?.unitPriceKes === 200 && byId('kyc-driving-licence')?.backupRateKes === 260);
   check('pricing: Metropol tiers 85/150/300 all confirmed', byId('kyc-metropol-score')?.unitPriceKes === 85 && byId('kyc-metropol-standard')?.unitPriceKes === 150 && byId('kyc-metropol-full')?.unitPriceKes === 300);
   check('pricing: CreditInfo 50/350/2,000 all confirmed', byId('kyc-ci-score')?.unitPriceKes === 50 && byId('kyc-creditinfo')?.unitPriceKes === 350 && byId('kyc-ci-status')?.unitPriceKes === 2000);
@@ -270,37 +275,17 @@ try {
 
   const unknown = await req('GET', '/api/nope');
   check('misc: unknown routes answer JSON, not HTML', unknown.status === 404 && unknown.json?.ok === false);
-  /* ---- hardened mode: ALLOW_HEADER_AUTH=0 forbids the legacy identity header ---- */
-  await new Promise((resolve) => {
-    const strict = spawn(process.execPath, ['server/index.mjs'], {
-      cwd: new URL('..', import.meta.url).pathname,
-      env: { ...process.env, PORT: String(PORT + 1), IPRS_DB: path.join(dataDir, 'strict.sqlite'), ALLOW_HEADER_AUTH: '0' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    const strictBase = `http://127.0.0.1:${PORT + 1}`;
-    const giveUp = setTimeout(() => { strict.kill('SIGTERM'); resolve(null); }, 30000);
-    const poll = setInterval(async () => {
-      try {
-        const h = await fetch(`${strictBase}/api/health`);
-        if (!h.ok) return;
-        clearInterval(poll); clearTimeout(giveUp);
-        const headerOnly = await fetch(`${strictBase}/api/wallet`, { headers: { 'x-user-id': login.json.user.id } });
-        check('hardened: ALLOW_HEADER_AUTH=0 rejects the bare identity header', headerOnly.status === 401, String(headerOnly.status));
-        // The strict server runs its own throwaway DB, so its signing secret differs —
-        // a token from the other instance MUST fail here (tokens are DB-scoped).
-        const crossDb = await fetch(`${strictBase}/api/auth/me`, { headers: { Authorization: `Bearer ${bearer}` } });
-        check('hardened: a token from another deployment is rejected (DB-scoped secret)', crossDb.status === 401, String(crossDb.status));
-        const strictLogin = await fetch(`${strictBase}/api/auth/login`, {
-          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'analyst@iprs.co.ke', password: 'Iprs@2026!' }),
-        });
-        const strictTok = ((await strictLogin.json()) ?? {}).token;
-        const withTok = await fetch(`${strictBase}/api/auth/me`, { headers: { Authorization: `Bearer ${strictTok}` } });
-        check('hardened: bearer token still authenticates', withTok.status === 200);
-        strict.kill('SIGTERM');
-        resolve(null);
-      } catch { /* not up yet */ }
-    }, 300);
-  });
+  /* ---- header fallback retired: identity is bearer-only ---- */
+  const headerOnly = await req('GET', '/api/users', null, superId, null);
+  check('hardened: the bare x-user-id header is RETIRED (401 even for a real id)', headerOnly.status === 401, String(headerOnly.status));
+  const stillWorks = await req('GET', '/api/users', null, null, superTok);
+  check('hardened: bearer token remains the sole identity', stillWorks.status === 200);
+
+  /* ---- password hashing ---- */
+  const pwScan = JSON.stringify(login.json);
+  check('auth: no plaintext or hash material leaks in auth responses', !/"password(hash)?"/i.test(pwScan));
+  const zuriLogin = await req('POST', '/api/auth/login', { email: 'zuri.achieng@iprs.co.ke', password: 'Str0ng!Pass1' });
+  check('auth: a created account can sign in (hash round-trip)', zuriLogin.status === 200 && !!zuriLogin.json?.token, String(zuriLogin.status));
 } finally {
   child.kill('SIGTERM');
   await sleep(300);
