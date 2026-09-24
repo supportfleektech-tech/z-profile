@@ -11,6 +11,7 @@ import {
 import { KraLogo, MpesaLogo, CrbLogo, EmployerLogo, KplcLogo } from '../common/ProviderLogos';
 import { KES, formatDate, maskSecret, timeAgo, toCsv, downloadText } from '../../lib/format';
 import type { ApiKeyRecord, ProviderConfig, ProviderFieldMapping, ProviderRequestLog } from '../../types';
+import { SPIN_MODULES } from '../../data/spinModules';
 
 const TABS = ['Gateways', 'Configuration', 'Field Mapping', 'API Keys', 'Request Logs', 'Usage & Cost'] as const;
 type Tab = (typeof TABS)[number];
@@ -766,6 +767,11 @@ export const Screen10_ProviderManagement: React.FC = () => {
           <Loader2 size={13} className="animate-spin" /> Testing {providers.find((p) => p.id === testingProviderId)?.name}…
         </div>
       )}
+      {can('providers.view') && (
+        <div className="px-2 sm:px-4 pb-4">
+          <SpinModuleCatalogue />
+        </div>
+      )}
       {!can('providers.view') && (
         <div className="p-4">
           <Callout tone="danger" title="Access denied" icon={<AlertTriangle size={14} />}>
@@ -785,6 +791,59 @@ const Group: React.FC<{ label: string; children: React.ReactNode }> = ({ label, 
     </div>
     {children}
   </div>
+);
+
+/**
+ * Spin Mobile (Kenya) module catalogue — transcribed from docs.spinmobile.co.
+ * Shown in Provider Management so operators can see exactly which SuperCrunch
+ * search_type, endpoint and payload shape each verification maps to.
+ */
+const SpinModuleCatalogue: React.FC = () => (
+  <Panel
+    title="Spin Mobile Kenya — SuperCrunch module catalogue"
+    subtitle="Transcribed from docs.spinmobile.co · auth: POST /analytics/auth/ (consumer key + secret → ~10 min bearer token)"
+    icon={<Server size={14} className="text-cyan-400" />}
+  >
+    <div className="overflow-x-auto -mx-1 px-1">
+      <table className="w-full text-[10px] min-w-[720px]">
+        <thead>
+          <tr className="text-left text-slate-500 border-b border-sky-900/60">
+            <th className="py-1.5 pr-2 font-semibold">Module</th>
+            <th className="py-1.5 pr-2 font-semibold">search_type</th>
+            <th className="py-1.5 pr-2 font-semibold">Endpoint</th>
+            <th className="py-1.5 pr-2 font-semibold">Identifier</th>
+            <th className="py-1.5 pr-2 font-semibold">Returns</th>
+            <th className="py-1.5 font-semibold">Priced as</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-sky-950/60">
+          {SPIN_MODULES.map((m) => (
+            <tr key={m.id} className="align-top">
+              <td className="py-1.5 pr-2">
+                <span className="block font-semibold text-slate-200">{m.name}</span>
+                <span className="block text-slate-600">{m.section}</span>
+              </td>
+              <td className="py-1.5 pr-2 font-mono text-cyan-300">{m.searchType}</td>
+              <td className="py-1.5 pr-2 font-mono text-slate-400">{m.endpoint ?? <span className="text-slate-600 italic">per onboarding</span>}</td>
+              <td className="py-1.5 pr-2 text-slate-400">{m.identifierLabel}</td>
+              <td className="py-1.5 pr-2 text-slate-500 max-w-[240px]">
+                {m.responseFields.length ? m.responseFields.slice(0, 3).map((f) => f.name).join(' · ') + (m.responseFields.length > 3 ? ' …' : '') : <span className="italic">see docs</span>}
+                {m.fidelity === 'section-only' && <span className="block text-amber-500/80 mt-0.5">section-only fidelity</span>}
+              </td>
+              <td className="py-1.5 font-mono text-slate-500">{m.pricedItemId ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <p className="mt-3 text-[10px] text-slate-600 leading-relaxed">
+      Every search shares one body shape: <code className="font-mono text-slate-400">{`{ search_type, identifier, consent, consent_collected_by }`}</code> (M-PESA KYC adds
+      <code className="font-mono text-slate-400"> phone_number</code>; Metropol Full uses <code className="font-mono text-slate-400">identity_number</code> + identifier-as-type).
+      Responses arrive in one of two envelopes: <code className="font-mono text-slate-400">{`{ code: "200.001", data }`}</code> (analytics) or{' '}
+      <code className="font-mono text-slate-400">{`{ response_code: "200", success, message, data }`}</code> (verification). Sandbox and production share one base URL — only the
+      keys differ. The live adapter engages when <code className="font-mono text-slate-400">SPIN_CONSUMER_KEY/SECRET</code> are set; health reports the mode.
+    </p>
+  </Panel>
 );
 
 export default Screen10_ProviderManagement;

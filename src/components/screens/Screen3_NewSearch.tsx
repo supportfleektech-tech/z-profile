@@ -7,6 +7,7 @@ import { useAppData } from '../../context/AppDataContext';
 import { useAppRouter } from '../../context/RouterContext';
 import { Badge, Button, Callout, Checkbox, Field, Panel, Select, TextInput } from '../ui';
 import { kycItems, kybItems, pricingProvenance } from '../../data/pricing';
+import { spinModuleForItem } from '../../data/spinModules';
 import { KES, uid } from '../../lib/format';
 import type { PricedItem } from '../../types';
 
@@ -130,6 +131,11 @@ export const Screen3_NewSearch: React.FC<Props> = ({ onExecuteSearch }) => {
           <span className="mt-1 flex flex-wrap items-center gap-1.5">
             <Badge tone="neutral">{item.source}</Badge>
             <Badge tone="info">{item.turnaround}</Badge>
+            {spinModuleForItem(item.id) && (
+              <span className="text-[9px] font-mono text-cyan-300/90 border border-cyan-800/60 rounded px-1 py-px" title="Spin Mobile SuperCrunch search_type">
+                {spinModuleForItem(item.id)!.searchType}
+              </span>
+            )}
             <span className="text-[9px] text-slate-600 font-mono">incl. {item.includedInBatch}/batch</span>
           </span>
         </span>

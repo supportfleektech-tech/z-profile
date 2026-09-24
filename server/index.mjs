@@ -15,6 +15,8 @@
 import { effectivePermissions } from '../src/auth/permissions.ts';
 import { bearerOf, issueToken, verifyToken } from './auth.mjs';
 import * as daraja from './daraja.mjs';
+import * as spin from './spin.mjs';
+import { SPIN_MODULES, SPIN_AUTH } from '../src/data/spinModules.ts';
 import express from 'express';
 import cors from 'cors';
 import crypto from 'node:crypto';
@@ -299,6 +301,7 @@ app.get('/api/health', wrap((_req, res) => {
     storage: { engine: 'node:sqlite', path: DB_PATH },
     counts: stats(),
     gateway: daraja.describe(),
+    spin: spin.describe(),
   });
 }));
 
@@ -1043,6 +1046,9 @@ app.post('/api/settings/import', requirePerm('settings.edit.platform'), wrap((re
 
 /* --------------------------------- pricing -------------------------------- */
 
+app.get('/api/spin/modules', requirePerm('providers.view'), wrap((_req, res) => {
+  res.json({ ok: true, auth: SPIN_AUTH, modules: SPIN_MODULES });
+}));
 app.get('/api/pricing', wrap((_req, res) => res.json(pricing())));
 
 app.patch('/api/pricing', requirePerm('pricing.edit'), wrap((req, res) => {

@@ -25,6 +25,7 @@ import { readFileSync } from 'node:fs';
 import { bootApp, loginAs, check, summarise, sleep, STORAGE_KEY } from './lib/app.mjs';
 import { platformRoutes } from '../src/types/routes.ts';
 import { pricingCatalog, pricingProvenance } from '../src/data/pricing.ts';
+import { spinModuleForItem } from '../src/data/spinModules.ts';
 
 const DIST = new URL('../dist/index.html', import.meta.url).pathname;
 const pass = (name, cond, detail = '') => check(name, cond, detail);
@@ -292,9 +293,13 @@ const pass = (name, cond, detail = '') => check(name, cond, detail);
 /* ════════════════════ Pricing — proposal transcription visible ════════════════════ */
 {
   const prov = pricingProvenance(pricingCatalog);
-  pass('pricing: catalogue has the full proposal line-item set', prov.total === 25, `${prov.total} items`);
+  pass('pricing: catalogue covers proposal + documented Spin modules', prov.total === 30, `${prov.total} items`);
   pass('pricing: 15 items confirmed from the received proposal', prov.confirmed === 15, `${prov.confirmed} confirmed`);
-  pass('pricing: 10 items remain flagged provisional', prov.provisional === 10, `${prov.provisional} provisional`);
+  pass('pricing: 15 items remain flagged provisional', prov.provisional === 15, `${prov.provisional} provisional`);
+  pass('pricing: every priced item maps to a documented Spin module or an explicit gap', (() => {
+    const unmapped = pricingCatalog.items.filter((i) => !spinModuleForItem(i.id) && !['kyc-criminal', 'kyc-deceased', 'kyc-vehicle', 'kyc-pep', 'kyc-statement'].includes(i.id) && !i.id.startsWith('kyb-'));
+    return unmapped.length === 0;
+  })());
   pass('pricing: catalogue flag stays false until the remainder arrive', pricingCatalog.confirmedFromProposal === false);
 
   const idItem = pricingCatalog.items.find((i) => i.id === 'kyc-id');
@@ -321,10 +326,10 @@ const pass = (name, cond, detail = '') => check(name, cond, detail);
   await sleep(400);
   await app.goto('/search');
   await app.waitFor(() => /provisional pricing/i.test(app.$('main')?.textContent ?? ''), { label: 'search banner' });
-  pass('pricing: New Search banner states the exact 15/25 split', /15 of 25 rates unconfirmed|15 rates are transcribed/.test(app.$('main')?.textContent ?? ''));
+  pass('pricing: New Search banner states the exact 15/25 split', /15 of 30 rates unconfirmed|15 rates are transcribed/.test(app.$('main')?.textContent ?? ''));
   await app.goto('/pricing');
   await app.waitFor(() => /rates confirmed/i.test(app.$('main')?.textContent ?? ''), { label: 'pricing banner' });
-  pass('pricing: Pricing & Tiers banner states the exact split', /15 of 25 rates confirmed/.test(app.$('main')?.textContent ?? ''));
+  pass('pricing: Pricing & Tiers banner states the exact split', /15 of 30 rates confirmed/.test(app.$('main')?.textContent ?? ''));
 }
 
 const fails = summarise('REQUIREMENT TRACEABILITY');

@@ -202,10 +202,22 @@ try {
 
   /* ---- pricing: the transcribed proposal ---- */
   const pricing = await req('GET', '/api/pricing');
-  check('pricing: catalogue serves 25 line items', pricing.json?.items?.length === 25, String(pricing.json?.items?.length));
+  check('pricing: catalogue serves 30 line items', pricing.json?.items?.length === 30, String(pricing.json?.items?.length));
   check('pricing: 15 items carry confirmedFromProposal', pricing.json?.items?.filter((i) => i.confirmedFromProposal).length === 15);
   check('pricing: IPRS Standard is KES 30 with a KES 45 back-up rate', pricing.json?.items?.find((i) => i.id === 'kyc-id')?.unitPriceKes === 30 && pricing.json?.items?.find((i) => i.id === 'kyc-id')?.backupRateKes === 45);
   check('pricing: catalogue flag stays false while items are provisional', pricing.json?.confirmedFromProposal === false);
+
+  /* ---- Spin Mobile module registry ---- */
+  const spinMods = await req('GET', '/api/spin/modules', null, null, superTok);
+  check('spin: module registry serves 21 documented Kenya modules', spinMods.json?.modules?.length === 21, String(spinMods.json?.modules?.length));
+  check('spin: registry carries the SuperCrunch auth contract', spinMods.json?.auth?.tokenPath === '/analytics/auth/' && spinMods.json?.auth?.tokenTtlMinutes === 10);
+  check('spin: MPESAKYCCHECK module maps to the priced M-PESA check', spinMods.json?.modules?.find((m) => m.searchType === 'MPESAKYCCHECK')?.pricedItemId === 'kyc-mpesa');
+  // providers.view is deliberately held by user sub-roles (read-only visibility in the
+  // route table); configuring is what stays privileged. So: analyst reads, anon cannot.
+  const spinAsUser = await req('GET', '/api/spin/modules', null, null, login.json.token);
+  check('spin: user tier can READ the module registry (read-only by design)', spinAsUser.status === 200, String(spinAsUser.status));
+  const spinAnon = await req('GET', '/api/spin/modules', null, null, null);
+  check('spin: module registry denied without an actor', spinAnon.status === 401);
 
   /* ---- settings authorisation ---- */
   const userPatch = await req('PATCH', '/api/settings/security', { maxFailedLogins: 2 }, asAnalyst);
