@@ -1,3 +1,11 @@
+> **STATUS — EXECUTED.** Every item below shipped on branch `arena/01a0cbfb-z-profile`
+> (PR #1). The "current state" audit sections describe the ORIGINAL code, kept as
+> history. Authoritative truth now lives in: `README.md`, `AGENTS.md`,
+> `docs/MANUAL_TEST_CHECKLIST.md`, and the `npm run verify` gate (231 assertions).
+> Pricing update since this plan was written: the proposal extract arrived and the
+> 0–500 batch is transcribed — 15 of 25 rates confirmed, 10 still flagged (no KYB /
+> vehicle / criminal / deceased rates were quoted).
+
 # IPRS Kenya Platform — Comprehensive Upgrade Plan
 
 **Branch:** `arena/01a0cbfb-z-profile` · **Base:** `999ef74` · **Date:** 2026-09-23
