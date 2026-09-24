@@ -599,7 +599,7 @@ export function buildPricingSchedulePdf(catalog: PricingCatalog, settings: Syste
       provisionalCount === 0 ? 'Schedule confirmed' : `Partly provisional schedule — ${provisionalCount} of ${catalog.items.length} rates unconfirmed`,
       provisionalCount === 0
         ? `All ${confirmedCount} rates are transcribed from the ${catalog.proposalRef} (batch ${catalog.batchLabel}). Set confirmedFromProposal to clear this notice.`
-        : `${confirmedCount} of ${catalog.items.length} rates are transcribed from the ${catalog.proposalRef} (batch ${catalog.batchLabel}). The remaining ${provisionalCount} are placeholders — the Vehicle Verification table was received truncated and the extract quotes no criminal, deceased or KYB products. Rows marked provisional should not be treated as contracted pricing.`,
+        : `${confirmedCount} of ${catalog.items.length} rates are transcribed from the ${catalog.proposalRef} (batch ${catalog.batchLabel}, VAT exclusive). The remaining ${provisionalCount} are placeholders — the proposal quotes no criminal, deceased, business-tax-compliance or CRB-business-report rates, and the Spin-documented composites are unpriced. Rows marked provisional should not be treated as contracted pricing.`,
       { accent: provisionalCount === 0 ? COLORS.green : COLORS.amber }
     );
   }

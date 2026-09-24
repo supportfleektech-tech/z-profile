@@ -202,10 +202,15 @@ try {
 
   /* ---- pricing: the transcribed proposal ---- */
   const pricing = await req('GET', '/api/pricing');
-  check('pricing: catalogue serves 30 line items', pricing.json?.items?.length === 30, String(pricing.json?.items?.length));
-  check('pricing: 15 items carry confirmedFromProposal', pricing.json?.items?.filter((i) => i.confirmedFromProposal).length === 15);
+  check('pricing: catalogue serves 34 line items', pricing.json?.items?.length === 34, String(pricing.json?.items?.length));
+  check('pricing: 28 items carry confirmedFromProposal', pricing.json?.items?.filter((i) => i.confirmedFromProposal).length === 28);
   check('pricing: IPRS Standard is KES 30 with a KES 45 back-up rate', pricing.json?.items?.find((i) => i.id === 'kyc-id')?.unitPriceKes === 30 && pricing.json?.items?.find((i) => i.id === 'kyc-id')?.backupRateKes === 45);
   check('pricing: catalogue flag stays false while items are provisional', pricing.json?.confirmedFromProposal === false);
+  const byId = (id) => pricing.json?.items?.find((i) => i.id === id);
+  check('pricing: vehicle KES 1,160 and driving licence 200/260 (proposal 0–500)', byId('kyc-vehicle')?.unitPriceKes === 1160 && byId('kyc-driving-licence')?.unitPriceKes === 200 && byId('kyc-driving-licence')?.backupRateKes === 260);
+  check('pricing: Metropol tiers 85/150/300 all confirmed', byId('kyc-metropol-score')?.unitPriceKes === 85 && byId('kyc-metropol-standard')?.unitPriceKes === 150 && byId('kyc-metropol-full')?.unitPriceKes === 300);
+  check('pricing: CreditInfo 50/350/2,000 all confirmed', byId('kyc-ci-score')?.unitPriceKes === 50 && byId('kyc-creditinfo')?.unitPriceKes === 350 && byId('kyc-ci-status')?.unitPriceKes === 2000);
+  check('pricing: BRS (KYB) APIs at KES 1,300, five products confirmed', ['kyb-registry', 'kyb-directors', 'kyb-bo', 'kyb-litigation', 'kyb-licence'].every((id) => byId(id)?.unitPriceKes === 1300 && byId(id)?.confirmedFromProposal));
 
   /* ---- super admin adjusts prices ---- */
   const adjust = (items, unit, id = 'kyc-id') => items.map((i) => (i.id === id ? { ...i, unitPriceKes: unit } : i));
@@ -230,7 +235,7 @@ try {
 
   /* ---- Spin Mobile module registry ---- */
   const spinMods = await req('GET', '/api/spin/modules', null, null, superTok);
-  check('spin: module registry serves 21 documented Kenya modules', spinMods.json?.modules?.length === 21, String(spinMods.json?.modules?.length));
+  check('spin: module registry serves 24 documented Kenya modules (incl. CRB tiers)', spinMods.json?.modules?.length === 24, String(spinMods.json?.modules?.length));
   check('spin: registry carries the SuperCrunch auth contract', spinMods.json?.auth?.tokenPath === '/analytics/auth/' && spinMods.json?.auth?.tokenTtlMinutes === 10);
   check('spin: MPESAKYCCHECK module maps to the priced M-PESA check', spinMods.json?.modules?.find((m) => m.searchType === 'MPESAKYCCHECK')?.pricedItemId === 'kyc-mpesa');
   // providers.view is deliberately held by user sub-roles (read-only visibility in the

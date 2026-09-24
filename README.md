@@ -82,10 +82,15 @@ mode). Full review: `docs/SPIN_INTEGRATION.md`.
 ## Pricing
 
 All rates live in `src/data/pricing.ts` (single-file edit; UI, wallet debits, PDF price
-schedule and backend seed all read it). The 0–500 batch is transcribed from the KYC/KYB
-Financial Proposal 2026: **15 of 25** line items carry `confirmedFromProposal: true`;
-the Vehicle table arrived truncated and the extract quotes no criminal, deceased or KYB
-products, so those 10 stay flagged and every banner reports the exact split.
+schedule and backend seed all read it). The **full proposal has been received** and the
+0–500 batch is transcribed exactly as quoted, VAT exclusive — **28 of 34** line items
+confirmed: Identity Verification APIs 30 (back-up 45), Alien/AML-PEP/Passport 75,
+Utility & Compliance 20, Phone-by-ID 50, Spin Score 130, Scanned Statement 120 + 4/page,
+Motor Vehicle Ownership 1,160, Driver's Licence 200 (back-up 260), Metropol 85/150/300,
+CreditInfo 50/350/2,000, and BRS (KYB) APIs at 1,300. Six items stay provisional (no
+quote in the proposal): criminal, deceased, business tax compliance, CRB business
+report, and the two Spin-documented composites. Higher volume bands are quoted but not
+wired, per instruction.
 
 **Price governance:** the Super Admin adjusts every rate live on **Pricing & Tiers** —
 per-item unit, overage, back-up and per-page rates plus bundle prices, via inline inputs

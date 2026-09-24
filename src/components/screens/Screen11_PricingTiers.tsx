@@ -179,9 +179,10 @@ export const Screen11_PricingTiers: React.FC = () => {
         <div className="px-3 sm:px-4 pt-3">
           <Callout tone="warning" title={`${prov.confirmed} of ${prov.total} rates confirmed from the proposal`} icon={<AlertTriangle size={14} />}>
             <p className="text-[11px] leading-relaxed">
-              The KYC / identity API rates below are transcribed from <strong>{pricing.proposalRef}</strong> (batch {pricing.batchLabel}, VAT
-              exclusive). {prov.provisional} line items are still placeholders: the Vehicle Verification table arrived truncated, and the
-              extract quotes no criminal/deceased or KYB products. Each row states its own status.{' '}
+              The proposal has been received in full and the 0–500 batch is transcribed from{' '}
+              <strong>{pricing.proposalRef}</strong> (VAT exclusive). {prov.confirmed} line items are confirmed against it. {prov.provisional} remain
+              placeholders — the proposal quotes no criminal/deceased, business-tax-compliance or CRB-business-report rates, and the two Spin-documented
+              composites (Identity+KRA, Full KYC) are not priced in it. Each row states its own status.{' '}
               {canEdit ? 'You can adjust any rate inline or via the per-row Edit drawer, then save.' : 'The Super Admin can adjust these rates.'} Clearing this
               banner everywhere needs every line confirmed plus{' '}
               <code className="font-mono">confirmedFromProposal</code> set.
