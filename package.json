@@ -14,7 +14,9 @@
     "smoke:dom": "node scripts/smoke-dom.mjs",
     "smoke:flows": "node scripts/smoke-flows.mjs",
     "smoke:pdf": "SMOKE_DUMP_DIR=.smoke-artifacts node scripts/smoke-dom.mjs",
-    "verify": "npm run typecheck && npm run build && npm run smoke:dom && npm run smoke:flows"
+    "verify": "npm run typecheck && npm run build && npm run smoke:api && npm run smoke:dom && npm run smoke:flows && npm run smoke:trace",
+    "smoke:trace": "node scripts/smoke-requirements.mjs",
+    "smoke:api": "node scripts/smoke-api.mjs"
   },
   "dependencies": {
     "clsx": "2.1.1",

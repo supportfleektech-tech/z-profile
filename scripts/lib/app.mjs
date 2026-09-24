@@ -39,7 +39,7 @@ function loadBuild() {
 }
 
 /** Boot one isolated instance of the app. Each call is a completely fresh session. */
-export function bootApp() {
+export function bootApp({ storage } = {}) {
   const errors = [];
   const vc = new VirtualConsole();
   vc.on('jsdomError', (e) => { if (!NOISE.test(e.message)) errors.push(`jsdomError: ${e.message}`); });
@@ -48,6 +48,12 @@ export function bootApp() {
   const { markup, code } = loadBuild();
   const dom = new JSDOM(markup, { url: `${ORIGIN}/`, runScripts: 'dangerously', pretendToBeVisual: true, virtualConsole: vc });
   const { window } = dom;
+
+  // Optionally pre-seed localStorage BEFORE the bundle boots, so a second boot can
+  // prove that state written by a first session genuinely survives a reload.
+  if (storage) {
+    for (const [k, v] of Object.entries(storage)) window.localStorage.setItem(k, v);
+  }
 
   /* ---- polyfill the browser APIs jsdom lacks ---- */
   window.matchMedia = (q) => ({ matches: false, media: q, onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false });
