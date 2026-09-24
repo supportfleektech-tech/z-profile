@@ -19,6 +19,9 @@ export interface LoginResult {
   reason?: 'invalid_credentials' | 'inactive' | 'locked' | 'mfa_required' | 'unknown_email';
   message?: string;
   requiresMfa?: boolean;
+  /** Signed bearer token issued by the backend (absent in LOCAL mode). */
+  token?: string;
+  expiresAt?: string;
 }
 
 const sessionUser = (): SystemUser | null => {
@@ -117,8 +120,14 @@ export const authService = {
 
     const { data } = await apiOr<LoginResult>('/api/auth/login', { method: 'POST', body: { email, password } }, local);
     if (data.ok && data.user) {
-      // Mirror a backend-authenticated session into the local store for offline rendering.
-      setState((prev) => ({ currentUserId: data.user!.id, users: prev.users.some((u) => u.id === data.user!.id) ? prev.users : [...prev.users, data.user!] }));
+      // Mirror a backend-authenticated session into the local store for offline rendering,
+      // and keep the bearer token so http.ts can sign every subsequent call.
+      setState((prev) => ({
+        currentUserId: data.user!.id,
+        authToken: data.token ?? null,
+        authTokenExpiresAt: data.expiresAt ?? null,
+        users: prev.users.some((u) => u.id === data.user!.id) ? prev.users : [...prev.users, data.user!],
+      }));
     }
     return data;
   },
@@ -141,7 +150,10 @@ export const authService = {
         detail: reason,
       });
     }
-    setState({ currentUserId: null });
+    // Fire-and-forget: let the backend revoke the session row (kills the bearer token
+    // server-side) even though the local store is already cleared below.
+    void apiOr('/api/auth/logout', { method: 'POST', body: { reason } }, async () => undefined);
+    setState({ currentUserId: null, authToken: null, authTokenExpiresAt: null });
     return void s;
   },
 

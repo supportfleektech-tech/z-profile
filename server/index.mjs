@@ -13,6 +13,8 @@
  */
 
 import { effectivePermissions } from '../src/auth/permissions.ts';
+import { bearerOf, issueToken, verifyToken } from './auth.mjs';
+import * as daraja from './daraja.mjs';
 import express from 'express';
 import cors from 'cors';
 import crypto from 'node:crypto';
@@ -123,8 +125,22 @@ const maskCard = (digits) => {
 
 /** Best-effort actor resolution from a bearer/`x-user-id` header. Demo only. */
 function actorOf(req) {
-  const id = req.headers['x-user-id'] ?? req.body?.actorId ?? null;
-  return id ? findUser(String(id)) : null;
+  // 1) Bearer token — signed, expiring, bound to a live session row (see server/auth.mjs).
+  const bearer = bearerOf(req);
+  if (bearer) {
+    const verdict = verifyToken(bearer);
+    if (verdict.ok) return findUser(verdict.uid) ?? null;
+    // A presented-but-invalid token is a hard reject: never silently fall back from it.
+    return null;
+  }
+  // 2) Legacy identity header — DEMO CONVENIENCE ONLY. It makes the seeded accounts
+  //    curl-friendly, but anyone can claim any id with it. Set ALLOW_HEADER_AUTH=0
+  //    to require real tokens (the browser app always sends a token when it has one).
+  if ((process.env.ALLOW_HEADER_AUTH ?? '1') !== '0') {
+    const id = req.headers['x-user-id'] ?? req.body?.actorId ?? null;
+    return id ? findUser(String(id)) : null;
+  }
+  return null;
 }
 
 /* ────────────────────── authorisation helpers ──────────────────────
@@ -282,6 +298,7 @@ app.get('/api/health', wrap((_req, res) => {
     node: process.version,
     storage: { engine: 'node:sqlite', path: DB_PATH },
     counts: stats(),
+    gateway: daraja.describe(),
   });
 }));
 
@@ -325,7 +342,7 @@ app.post('/api/auth/login', wrap(async (req, res) => {
   const updated = { ...user, failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: now(), lastLoginIp: ip };
   putUser(updated);
 
-  putSession({
+  const latestSession = putSession({
     id: uid('ses'), userId: updated.id, userName: updated.name, tier: updated.tier, ip,
     device: req.body?.device ?? 'Web client', browser: req.body?.browser ?? 'Chrome',
     location: 'Nairobi, KE', startedAt: now(), lastSeenAt: now(), current: true,
@@ -337,7 +354,8 @@ app.post('/api/auth/login', wrap(async (req, res) => {
     detail: `Signed in as ${updated.tier === 'user' ? `User · ${updated.subRole}` : updated.tier === 'admin' ? 'Admin' : 'Super Admin'}${requiresMfa ? ' (MFA required)' : ''}`,
   });
 
-  res.json({ ok: true, user: publicUser(updated), requiresMfa });
+  const issued = issueToken(latestSession.id, updated.id);
+  res.json({ ok: true, user: publicUser(updated), requiresMfa, ...issued });
 }));
 
 app.post('/api/auth/logout', wrap((req, res) => {
@@ -530,30 +548,50 @@ app.post('/api/wallet/topup/mpesa/stk', requireActor, requireSelfOrPrivileged, w
   if (value > max) return bad(res, `Maximum top-up is KES ${max.toLocaleString('en-KE')}.`);
   if (!findUser(userId)) return bad(res, 'Unknown wallet holder.', 404);
 
-  await sleep(700); // modelled OAuth token fetch + STK dispatch
+  // Live Daraja when the four credentials are configured; modelled simulation otherwise.
+  // In live mode the settlement arrives via the Daraja callback route — no pre-rolled result.
+  let checkoutRequestID;
+  let merchantRequestID;
+  if (daraja.isLive()) {
+    try {
+      const pushed = await daraja.stkPush({ msisdn, amount: value, accountRef: 'IPRS Wallet', description: 'Wallet top-up' });
+      checkoutRequestID = pushed.CheckoutRequestID;
+      merchantRequestID = pushed.MerchantRequestID;
+    } catch (e) {
+      appendAudit({
+        actorId: userId, actorName: findUser(userId)?.name ?? 'System', actorTier: findUser(userId)?.tier ?? 'user',
+        action: 'wallet.topup.dispatch_failed', entity: 'Wallet', entityId: walletFor(userId)?.id ?? null,
+        severity: 'critical', ip: clientIp(req), detail: `Daraja STK dispatch failed: ${e.message}`,
+      });
+      return bad(res, `M-PESA dispatch failed at Daraja: ${e.message}`, 502);
+    }
+  } else {
+    await sleep(700); // modelled OAuth token fetch + STK dispatch
+    checkoutRequestID = `ws_CO_${stamp()}_${crypto.randomInt(1000, 9999)}`;
+    merchantRequestID = `29115-${crypto.randomInt(1000000, 9999999)}-${crypto.randomInt(0, 9)}`;
+  }
 
-  const checkoutRequestID = `ws_CO_${stamp()}_${crypto.randomInt(1000, 9999)}`;
-  const merchantRequestID = `29115-${crypto.randomInt(1000000, 9999999)}-${crypto.randomInt(0, 9)}`;
-
-  // Modelled handset outcome, resolved when the client polls /stk/:id or the
-  // Daraja callback route posts the result.
-  const roll = Math.random();
-  let ResultCode = 0;
-  let ResultDesc = 'The service request is processed successfully.';
-  if (value > 70000 && roll < 0.35) { ResultCode = 2001; ResultDesc = 'Insufficient funds in the customer wallet.'; }
-  else if (roll > 0.94) { ResultCode = 1037; ResultDesc = 'DS timeout — the customer could not be reached.'; }
-  else if (roll > 0.88) { ResultCode = 1032; ResultDesc = 'Request cancelled by the customer on the handset.'; }
+  // Modelled handset outcome (simulation only), resolved when the client polls
+  // /stk/:id or the Daraja callback route posts the result.
+  if (!daraja.isLive()) {
+    const roll = Math.random();
+    let ResultCode = 0;
+    let ResultDesc = 'The service request is processed successfully.';
+    if (value > 70000 && roll < 0.35) { ResultCode = 2001; ResultDesc = 'Insufficient funds in the customer wallet.'; }
+    else if (roll > 0.94) { ResultCode = 1037; ResultDesc = 'DS timeout — the customer could not be reached.'; }
+    else if (roll > 0.88) { ResultCode = 1032; ResultDesc = 'Request cancelled by the customer on the handset.'; }
+    stkSetResult(checkoutRequestID, {
+      MerchantRequestID: merchantRequestID, CheckoutRequestID: checkoutRequestID, ResultCode, ResultDesc,
+      MpesaReceiptNumber: ResultCode === 0 ? receiptCode() : undefined,
+      TransactionDate: ResultCode === 0 ? stamp() : undefined,
+      PhoneNumber: msisdn, Amount: value,
+    });
+  }
 
   stkPut({
     checkoutRequestID, merchantRequestID, userId, phone: msisdn, amount: value,
     startedAt: Date.now(), settleAfter: Date.now() + 7000 + crypto.randomInt(0, 2500),
     cancelled: false, result: null,
-  });
-  stkSetResult(checkoutRequestID, {
-    MerchantRequestID: merchantRequestID, CheckoutRequestID: checkoutRequestID, ResultCode, ResultDesc,
-    MpesaReceiptNumber: ResultCode === 0 ? receiptCode() : undefined,
-    TransactionDate: ResultCode === 0 ? stamp() : undefined,
-    PhoneNumber: msisdn, Amount: value,
   });
 
   appendAudit({

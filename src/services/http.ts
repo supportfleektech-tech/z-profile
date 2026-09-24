@@ -78,6 +78,25 @@ export function currentActorId(): string | null {
   }
 }
 
+/**
+ * Bearer token for authenticated calls (see server/auth.mjs — signed, expiring,
+ * bound to a live session). As with the actor provider, http.ts stays decoupled from
+ * the store: the app registers the provider once at boot.
+ */
+let tokenProvider: (() => string | null) | null = null;
+
+export function setAuthTokenProvider(fn: () => string | null): void {
+  tokenProvider = fn;
+}
+
+function currentToken(): string | null {
+  try {
+    return tokenProvider?.() ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -97,6 +116,8 @@ async function request<T>(method: string, path: string, body?: unknown, timeoutM
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (actor) headers['x-user-id'] = actor;
+    const token = currentToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     const res = await fetch(path, {
       method,
       signal: controller.signal,

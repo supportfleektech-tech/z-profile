@@ -55,6 +55,9 @@ import {
 export interface DbState {
   /* identity & access */
   currentUserId: string | null;
+  /** Bearer token issued by the backend at login (null in LOCAL mode). */
+  authToken: string | null;
+  authTokenExpiresAt: string | null;
   users: SystemUser[];
   sessions: SessionRecord[];
   audit: AuditEntry[];
@@ -131,6 +134,8 @@ export const defaultAppearance: AppearanceSettings = {
 function freshState(): DbState {
   return {
     currentUserId: null,
+    authToken: null,
+    authTokenExpiresAt: null,
     users: seedUsers.map((u) => ({ ...u })),
     sessions: seedSessions.map((s) => ({ ...s })),
     audit: seedAudit.map((a) => ({ ...a })),

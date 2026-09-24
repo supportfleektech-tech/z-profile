@@ -47,10 +47,16 @@ const waitHealthy = async () => {
   return false;
 };
 
-const req = async (method, p, body, userId) => {
+let bearer = null; // suite-wide default, set on first successful login
+const req = async (method, p, body, userId, asToken) => {
+  const tok = asToken === undefined ? bearer : asToken; // pass null explicitly to send none
   const r = await fetch(`${BASE}${p}`, {
     method,
-    headers: { 'content-type': 'application/json', ...(userId ? { 'x-user-id': userId } : {}) },
+    headers: {
+      'content-type': 'application/json',
+      ...(userId ? { 'x-user-id': userId } : {}),
+      ...(tok ? { Authorization: `Bearer ${tok}` } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   let json = null;
@@ -82,9 +88,17 @@ try {
   check('auth: correct credentials accepted', login.status === 200 && login.json?.user?.email === 'analyst@iprs.co.ke');
   check('auth: response leaks no password material', !JSON.stringify(login.json).match(/"password(hash)?"/i));
   const me = await req('GET', '/api/auth/me', null, login.json.user.id);
-  check('auth: x-user-id session resolves the actor', me.json?.user?.id === login.json.user.id);
+  check('auth: x-user-id session resolves the actor (demo fallback)', me.json?.user?.id === login.json.user.id);
+  bearer = login.json?.token ?? null;
+  check('auth: login issues a signed bearer token', typeof bearer === 'string' && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(bearer ?? ''), String(bearer?.slice(0, 24)));
+  const meTok = await req('GET', '/api/auth/me');
+  check('auth: bearer token resolves the actor (no identity header)', meTok.json?.user?.id === login.json.user.id);
+  const tampered = await req('GET', '/api/auth/me', null, null, `${bearer.slice(0, -4)}AAAA`);
+  check('auth: tampered token is rejected', tampered.status === 401);
+  const garbage = await req('GET', '/api/auth/me', null, null, 'garbage.payload');
+  check('auth: garbage token is rejected', garbage.status === 401);
   for (const ep of ['/api/users', '/api/payments', '/api/audit', '/api/settings', '/api/sessions', '/api/providers']) {
-    const anon = await req('GET', ep);
+    const anon = await req('GET', ep, null, null, null);
     check(`auth: ${ep} without an actor is 401`, anon.status === 401, String(anon.status));
   }
 
@@ -104,18 +118,20 @@ try {
   check('tiers: user tier may NOT create accounts', userCreates.status === 403);
   const adminLogin = await req('POST', '/api/auth/login', { email: 'admin@iprs.co.ke', password: 'Iprs@2026!' });
   const adminId = adminLogin.json.user.id;
-  const adminCreatesAdmin = await req('POST', '/api/users', { name: 'Y', email: 'y@iprs.co.ke', tier: 'admin', password: 'Str0ng!Pass1' }, adminId);
+  const adminTok = adminLogin.json.token;
+  const adminCreatesAdmin = await req('POST', '/api/users', { name: 'Y', email: 'y@iprs.co.ke', tier: 'admin', password: 'Str0ng!Pass1' }, null, adminTok);
   check('tiers: admin may NOT create an admin (super admin only)', adminCreatesAdmin.status === 403);
   const superLogin = await req('POST', '/api/auth/login', { email: 'superadmin@iprs.co.ke', password: 'Iprs@2026!' });
   const superId = superLogin.json.user.id;
-  const superCreatesAdmin = await req('POST', '/api/users', { name: 'Zuri Achieng', email: 'zuri.achieng@iprs.co.ke', tier: 'admin', password: 'Str0ng!Pass1', phone: '0712000001' }, superId);
+  const superTok = superLogin.json.token;
+  const superCreatesAdmin = await req('POST', '/api/users', { name: 'Zuri Achieng', email: 'zuri.achieng@iprs.co.ke', tier: 'admin', password: 'Str0ng!Pass1', phone: '0712000001' }, null, superTok);
   check('tiers: super admin CAN create an admin', [200, 201].includes(superCreatesAdmin.status) && superCreatesAdmin.json?.user?.tier === 'admin', JSON.stringify(superCreatesAdmin.json).slice(0, 80));
   const newUserId = superCreatesAdmin.json?.user?.id;
   check('tiers: created admin response leaks no password', !JSON.stringify(superCreatesAdmin.json).match(/"password(hash)?"/i));
-  const newWallet = await req('GET', '/api/wallet', null, newUserId);
+  const newWallet = await req('GET', '/api/wallet', null, null, superTok);
   const newArr = Array.isArray(newWallet.json) ? newWallet.json : [newWallet.json];
   check('tiers: new admin gets a provisioned wallet', typeof newArr[0]?.balance === 'number', `balance ${newArr[0]?.balance}`);
-  const superCreatesSuper = await req('POST', '/api/users', { name: 'S', email: 's@iprs.co.ke', tier: 'super_admin', password: 'Str0ng!Pass1' }, superId);
+  const superCreatesSuper = await req('POST', '/api/users', { name: 'S', email: 's@iprs.co.ke', tier: 'super_admin', password: 'Str0ng!Pass1' }, null, superTok);
   check('tiers: NOBODY can create a super admin via the API (seeded only)', superCreatesSuper.status === 403, superCreatesSuper.json?.message?.slice(0, 60));
 
   /* ---- wallet: M-PESA STK lifecycle ---- */
@@ -160,14 +176,27 @@ try {
   const bal3 = await asBal(asAnalyst);
   check('card: declined top-up does NOT credit the wallet', bal3 === bal2, `${bal2} -> ${bal3}`);
 
+  /* ---- token lifecycle: revocation on logout ---- */
+  const viewerLogin = await req('POST', '/api/auth/login', { email: 'viewer@iprs.co.ke', password: 'Iprs@2026!' });
+  const viewerToken = viewerLogin.json?.token;
+  check('auth: second persona gets its own token', typeof viewerToken === 'string' && viewerToken !== bearer);
+  const viewerMe = await req('GET', '/api/auth/me', null, null, viewerToken);
+  check('auth: viewer token authenticates before logout', viewerMe.json?.user?.email === 'viewer@iprs.co.ke');
+  const prevBearer = bearer;
+  bearer = viewerToken;
+  await req('POST', '/api/auth/logout', { reason: 'token revocation test' });
+  bearer = prevBearer;
+  const viewerAfter = await req('GET', '/api/auth/me', null, null, viewerToken);
+  check('auth: token is DEAD after logout (session-bound revocation)', viewerAfter.status === 401, String(viewerAfter.status));
+
   /* ---- payments: refund + idempotency ---- */
-  const pays = await req('GET', '/api/payments', null, superId);
+  const pays = await req('GET', '/api/payments', null, null, superTok);
   const successPay = (pays.json?.payments ?? pays.json ?? []).find((p) => p.status === 'success');
   check('payments: a successful payment exists to refund', !!successPay);
   if (successPay) {
-    const refund = await req('POST', `/api/payments/${successPay.id}/refund`, { reason: 'Duplicate collection', actorId: superId }, superId);
+    const refund = await req('POST', `/api/payments/${successPay.id}/refund`, { reason: 'Duplicate collection', actorId: superId }, null, superTok);
     check('payments: refund succeeds and marks the payment refunded', refund.status === 200 && (refund.json?.payment?.status ?? refund.json?.status) === 'refunded', JSON.stringify(refund.json).slice(0, 80));
-    const again = await req('POST', `/api/payments/${successPay.id}/refund`, { reason: 'Try twice', actorId: superId }, superId);
+    const again = await req('POST', `/api/payments/${successPay.id}/refund`, { reason: 'Try twice', actorId: superId }, null, superTok);
     check('payments: double refund is rejected (409)', again.status === 409);
   }
 
@@ -181,15 +210,15 @@ try {
   /* ---- settings authorisation ---- */
   const userPatch = await req('PATCH', '/api/settings/security', { maxFailedLogins: 2 }, asAnalyst);
   check('settings: user tier may NOT patch security settings', userPatch.status === 403);
-  const adminPlatform = await req('PATCH', '/api/settings/platform', { allowSignups: true }, adminId);
+  const adminPlatform = await req('PATCH', '/api/settings/platform', { allowSignups: true }, null, adminTok);
   check('settings: admin may NOT patch the platform group (super only)', adminPlatform.status === 403);
-  const adminBilling = await req('PATCH', '/api/settings/billing', { blockSearchOnNegativeBalance: true }, adminId);
+  const adminBilling = await req('PATCH', '/api/settings/billing', { blockSearchOnNegativeBalance: true }, null, adminTok);
   check('settings: admin CAN patch operational (billing) settings', adminBilling.status === 200, JSON.stringify(adminBilling.json).slice(0, 60));
-  const maint = await req('POST', '/api/settings/maintenance', { enabled: true }, adminId);
+  const maint = await req('POST', '/api/settings/maintenance', { enabled: true }, null, adminTok);
   check('settings: maintenance mode is super-admin only', maint.status === 403);
 
   /* ---- audit ---- */
-  const audit = await req('GET', '/api/audit', null, superId);
+  const audit = await req('GET', '/api/audit', null, null, superTok);
   const auditRows = Array.isArray(audit.json) ? audit.json : audit.json?.entries ?? [];
   check('audit: privileged actions are recorded', auditRows.some((e) => /user|created|account/i.test(JSON.stringify(e))), `${auditRows.length} entries`);
   const auditAsUser = await req('GET', '/api/audit', null, asAnalyst);
@@ -203,6 +232,37 @@ try {
 
   const unknown = await req('GET', '/api/nope');
   check('misc: unknown routes answer JSON, not HTML', unknown.status === 404 && unknown.json?.ok === false);
+  /* ---- hardened mode: ALLOW_HEADER_AUTH=0 forbids the legacy identity header ---- */
+  await new Promise((resolve) => {
+    const strict = spawn(process.execPath, ['server/index.mjs'], {
+      cwd: new URL('..', import.meta.url).pathname,
+      env: { ...process.env, PORT: String(PORT + 1), IPRS_DB: path.join(dataDir, 'strict.sqlite'), ALLOW_HEADER_AUTH: '0' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const strictBase = `http://127.0.0.1:${PORT + 1}`;
+    const giveUp = setTimeout(() => { strict.kill('SIGTERM'); resolve(null); }, 15000);
+    const poll = setInterval(async () => {
+      try {
+        const h = await fetch(`${strictBase}/api/health`);
+        if (!h.ok) return;
+        clearInterval(poll); clearTimeout(giveUp);
+        const headerOnly = await fetch(`${strictBase}/api/wallet`, { headers: { 'x-user-id': login.json.user.id } });
+        check('hardened: ALLOW_HEADER_AUTH=0 rejects the bare identity header', headerOnly.status === 401, String(headerOnly.status));
+        // The strict server runs its own throwaway DB, so its signing secret differs —
+        // a token from the other instance MUST fail here (tokens are DB-scoped).
+        const crossDb = await fetch(`${strictBase}/api/auth/me`, { headers: { Authorization: `Bearer ${bearer}` } });
+        check('hardened: a token from another deployment is rejected (DB-scoped secret)', crossDb.status === 401, String(crossDb.status));
+        const strictLogin = await fetch(`${strictBase}/api/auth/login`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'analyst@iprs.co.ke', password: 'Iprs@2026!' }),
+        });
+        const strictTok = ((await strictLogin.json()) ?? {}).token;
+        const withTok = await fetch(`${strictBase}/api/auth/me`, { headers: { Authorization: `Bearer ${strictTok}` } });
+        check('hardened: bearer token still authenticates', withTok.status === 200);
+        strict.kill('SIGTERM');
+        resolve(null);
+      } catch { /* not up yet */ }
+    }, 300);
+  });
 } finally {
   child.kill('SIGTERM');
   await sleep(300);

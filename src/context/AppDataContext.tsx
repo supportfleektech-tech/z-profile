@@ -27,7 +27,7 @@ import { walletService } from '../services/wallet.service';
 import { providerService } from '../services/provider.service';
 import { settingsService } from '../services/settings.service';
 import { searchService } from '../services/search.service';
-import { getApiMode, onApiModeChange, probeApi, setActorProvider, type ApiMode } from '../services/http';
+import { getApiMode, onApiModeChange, probeApi, setActorProvider, setAuthTokenProvider, type ApiMode } from '../services/http';
 import { can as canPermission, dashboardLabelFor, effectivePermissions, roleLabelFor } from '../auth/permissions';
 import { dossierToProfile } from '../data/dossier';
 import { subscriptionPlans } from '../data/pricing';
@@ -173,6 +173,7 @@ const AppDataContext = React.createContext<AppDataContextType | undefined>(undef
  * actor from `x-user-id`. Registered at module scope — before the first render.
  */
 setActorProvider(() => getSnapshot().currentUserId);
+setAuthTokenProvider(() => getSnapshot().authToken);
 
 export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const db = useDb();
