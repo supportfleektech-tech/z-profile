@@ -265,10 +265,10 @@ const pass = (name, cond, detail = '') => check(name, cond, detail);
   await loginAs(user, 'analyst@iprs.co.ke');
   await sleep(400);
   await user.goto('/admin');
-  await sleep(500);
+  await user.waitFor(() => /access denied/i.test(user.$('main')?.textContent ?? ''), { timeout: 10000, label: 'admin denied' });
   pass('req9: user tier is DENIED the admin console', /access denied/i.test(user.$('main')?.textContent ?? ''));
   await user.goto('/payments');
-  await sleep(500);
+  await user.waitFor(() => /access denied/i.test(user.$('main')?.textContent ?? ''), { timeout: 10000, label: 'payments denied' });
   pass('req9: user tier is DENIED the payments monitor', /access denied/i.test(user.$('main')?.textContent ?? ''));
 
   const admin = bootApp();
@@ -276,10 +276,10 @@ const pass = (name, cond, detail = '') => check(name, cond, detail);
   await loginAs(admin, 'admin@iprs.co.ke');
   await sleep(400);
   await admin.goto('/payments');
-  await admin.waitFor(() => /Payments Monitor|payment/i.test(admin.$('main')?.textContent ?? ''), { label: 'admin payments' });
+  await admin.waitFor(() => /Payments Monitor|payment/i.test(admin.$('main')?.textContent ?? ''), { timeout: 10000, label: 'admin payments' });
   pass('req9: admin tier DOES get the payments monitor', !/access denied/i.test(admin.$('main')?.textContent ?? ''));
   await admin.goto('/admin');
-  await admin.waitFor(() => /admin console|organisation|accounts/i.test(admin.$('main')?.textContent ?? ''), { label: 'admin console' });
+  await admin.waitFor(() => /admin console|organisation|accounts/i.test(admin.$('main')?.textContent ?? ''), { timeout: 10000, label: 'admin console' });
   pass('req9: admin tier opens the admin console its own tier dashboard gates', !/access denied/i.test(admin.$('main')?.textContent ?? ''));
 
   const superA = bootApp();

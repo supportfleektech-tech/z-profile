@@ -240,7 +240,7 @@ try {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const strictBase = `http://127.0.0.1:${PORT + 1}`;
-    const giveUp = setTimeout(() => { strict.kill('SIGTERM'); resolve(null); }, 15000);
+    const giveUp = setTimeout(() => { strict.kill('SIGTERM'); resolve(null); }, 30000);
     const poll = setInterval(async () => {
       try {
         const h = await fetch(`${strictBase}/api/health`);

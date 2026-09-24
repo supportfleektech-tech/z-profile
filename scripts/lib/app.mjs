@@ -196,6 +196,9 @@ export function bootApp({ storage } = {}) {
 
 /** Sign in a persona and clear any MFA step. Returns true on success. */
 export async function loginAs(app, email, password = DEMO_PASSWORD) {
+  // Cold runners can take longer than any fixed boot sleep to mount the login form,
+  // so wait for it (bounded) instead of trusting the caller's sleep.
+  await app.waitFor(() => !!app.$('input[type="password"]'), { timeout: 20000, label: 'login form' });
   const emailEl = app.findInput(/email/i) ?? app.$('input[type="email"]');
   const passEl = app.$('input[type="password"]');
   if (!emailEl || !passEl) return { ok: false, why: 'login inputs not found' };
@@ -205,7 +208,8 @@ export async function loginAs(app, email, password = DEMO_PASSWORD) {
   const submit = app.findButton('sign in') || app.findButton('log in') || app.$('button[type="submit"]');
   if (!submit) return { ok: false, why: 'submit button not found' };
   app.click(submit);
-  await sleep(1800);
+  await app.waitFor(() => !app.$('input[type="password"]') || !!app.findInput(/code|otp|mfa/i), { timeout: 10000, label: 'post-login transition' });
+  await sleep(400);
 
   // MFA challenge, if this account requires it.
   const otp = app.findInput(/code|otp|mfa/i);
@@ -214,7 +218,7 @@ export async function loginAs(app, email, password = DEMO_PASSWORD) {
     await sleep(100);
     const v = app.findButton('verify') || app.findButton('confirm') || app.$('button[type="submit"]');
     if (v) app.click(v);
-    await sleep(1800);
+    await app.waitFor(() => !app.$('input[type="password"]'), { timeout: 10000, label: 'post-mfa transition' });
   }
   const stillOnLogin = !!app.$('input[type="password"]') && /sign in/i.test(app.text().slice(0, 600));
   return { ok: !stillOnLogin, why: stillOnLogin ? 'still on login screen' : '' };
