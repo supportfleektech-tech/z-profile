@@ -7,8 +7,18 @@ interface Screen6CasesProps {
   onSelectCase?: (c: CaseItem) => void;
 }
 
+/**
+ * Cases.
+ *
+ * Reads `visibleCases`, not the raw list: the context scopes cases to the signed-in
+ * account unless it holds `case.view.all`, so a Viewer never sees another analyst's
+ * investigations. Create/status controls are additionally gated on `case.create` and
+ * `case.update` — sub-roles that may only *read* get a read-only board.
+ */
 export const Screen6_Cases: React.FC<Screen6CasesProps> = ({ onSelectCase }) => {
-  const { cases, addCase, updateCaseStatus } = useAppData();
+  const { visibleCases: cases, addCase, updateCaseStatus, can } = useAppData();
+  const canCreate = can('case.create');
+  const canUpdate = can('case.update');
   const [filterTab, setFilterTab] = useState<'All Cases' | 'Open' | 'In Progress' | 'Closed'>('All Cases');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState('All Types');
@@ -52,6 +62,7 @@ export const Screen6_Cases: React.FC<Screen6CasesProps> = ({ onSelectCase }) => 
 
   const cycleStatus = (c: CaseItem, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!canUpdate) return;
     const order: CaseItem['status'][] = ['Open', 'In Progress', 'Completed', 'Closed'];
     const next = order[(order.indexOf(c.status) + 1) % order.length];
     updateCaseStatus(c.id, next);
@@ -65,13 +76,19 @@ export const Screen6_Cases: React.FC<Screen6CasesProps> = ({ onSelectCase }) => 
           <h2 className="text-xs sm:text-sm font-bold text-white">Cases</h2>
           <span className="text-[10px] text-slate-400 font-mono">({cases.length})</span>
         </div>
-        <button
-          onClick={() => setShowNewModal(true)}
-          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-[10px] shadow-[0_0_10px_rgba(2,132,199,0.4)] transition-all active:scale-95"
-        >
-          <Plus size={12} />
-          <span>New Case</span>
-        </button>
+        {canCreate ? (
+          <button
+            onClick={() => setShowNewModal(true)}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-[10px] shadow-[0_0_10px_rgba(2,132,199,0.4)] transition-all active:scale-95"
+          >
+            <Plus size={12} />
+            <span>New Case</span>
+          </button>
+        ) : (
+          <span className="text-[9px] text-slate-500 border border-sky-900/60 rounded-lg px-2 py-1.5" title="Your role can view cases but not create them">
+            Read-only
+          </span>
+        )}
       </div>
 
       <div className="px-3 sm:px-4 py-1.5 bg-[#081527] border-b border-sky-900/40 flex items-center gap-2 overflow-x-auto">
@@ -130,19 +147,24 @@ export const Screen6_Cases: React.FC<Screen6CasesProps> = ({ onSelectCase }) => 
         {/* Mobile cards */}
         <div className="sm:hidden p-2 space-y-2">
           {filteredCases.length === 0 && (
-            <p className="text-center text-slate-500 py-8 text-xs">No cases match your filters</p>
+            <p className="text-center text-slate-500 py-8 text-xs">
+              {cases.length === 0 ? 'No cases are assigned to you yet' : 'No cases match your filters'}
+            </p>
           )}
           {filteredCases.map((c) => (
-            <button
+            <div
               key={c.id}
-              onClick={() => onSelectCase?.(c)}
               className="w-full text-left p-3 rounded-xl bg-[#091629] border border-sky-900/50 hover:border-cyan-500/40 transition-colors"
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="text-cyan-400 font-mono text-[11px] font-semibold">{c.caseId}</span>
-                <span
+                <button onClick={() => onSelectCase?.(c)} className="text-cyan-400 font-mono text-[11px] font-semibold hover:underline truncate">
+                  {c.caseId}
+                </button>
+                <button
                   onClick={(e) => cycleStatus(c, e)}
-                  className={`px-2 py-0.5 rounded text-[9px] font-semibold ${
+                  disabled={!canUpdate}
+                  title={canUpdate ? 'Tap to advance status' : 'Your role cannot change case status'}
+                  className={`px-2 py-0.5 rounded text-[9px] font-semibold shrink-0 disabled:opacity-60 disabled:cursor-default ${
                     c.status === 'In Progress'
                       ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30'
                       : c.status === 'Open'
@@ -153,12 +175,14 @@ export const Screen6_Cases: React.FC<Screen6CasesProps> = ({ onSelectCase }) => 
                   }`}
                 >
                   {c.status}
-                </span>
+                </button>
               </div>
-              <div className="mt-1.5 text-sm font-semibold text-white">{c.subject}</div>
-              <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400">
-                <span>{c.type}</span>
-                <span className="flex items-center gap-1">
+              <button onClick={() => onSelectCase?.(c)} className="mt-1.5 text-sm font-semibold text-white block w-full text-left truncate">
+                {c.subject}
+              </button>
+              <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400 gap-2">
+                <span className="truncate">{c.type}</span>
+                <span className="flex items-center gap-1 shrink-0">
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${
                       c.priority === 'High' ? 'bg-rose-500' : c.priority === 'Medium' ? 'bg-amber-400' : 'bg-emerald-400'
@@ -167,7 +191,7 @@ export const Screen6_Cases: React.FC<Screen6CasesProps> = ({ onSelectCase }) => 
                   {c.priority} · {c.updated}
                 </span>
               </div>
-            </button>
+            </div>
           ))}
         </div>
 
@@ -187,7 +211,7 @@ export const Screen6_Cases: React.FC<Screen6CasesProps> = ({ onSelectCase }) => 
             {filteredCases.length === 0 && (
               <tr>
                 <td colSpan={6} className="py-10 text-center text-slate-500">
-                  No cases match your filters
+                  {cases.length === 0 ? 'No cases are assigned to you yet' : 'No cases match your filters'}
                 </td>
               </tr>
             )}
@@ -213,8 +237,9 @@ export const Screen6_Cases: React.FC<Screen6CasesProps> = ({ onSelectCase }) => 
                 <td className="py-2.5 px-3">
                   <button
                     onClick={(e) => cycleStatus(c, e)}
-                    title="Click to advance status"
-                    className={`inline-block px-2 py-0.5 rounded text-[9px] font-semibold hover:opacity-80 ${
+                    disabled={!canUpdate}
+                    title={canUpdate ? 'Click to advance status' : 'Your role cannot change case status'}
+                    className={`inline-block px-2 py-0.5 rounded text-[9px] font-semibold hover:opacity-80 disabled:opacity-60 disabled:cursor-default ${
                       c.status === 'In Progress'
                         ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30'
                         : c.status === 'Open'

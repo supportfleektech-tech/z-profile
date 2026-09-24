@@ -2,19 +2,18 @@ import { useState, useEffect, useCallback } from 'react';
 import { RouterProvider, useAppRouter } from './context/RouterContext';
 import { AppDataProvider, useAppData } from './context/AppDataContext';
 import { Header } from './components/common/Header';
-import { PageNavigator } from './components/navigation/PageNavigator';
 import { PageRouter } from './components/navigation/PageRouter';
 import { SearchSimulationModal } from './components/interactive/SearchSimulationModal';
 import { ToastContainer } from './components/common/ToastContainer';
 import { CommandPalette } from './components/common/CommandPalette';
 import { AppShell } from './components/layout/AppShell';
-import { primaryProfile } from './data/mockData';
+import { PrintReport } from './components/report/PrintReport';
 
 function AppInner() {
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isCommandOpen, setIsCommandOpen] = useState(false);
   const { navigate, currentPage, currentPath } = useAppRouter();
-  const { setLastSearchResult, pushToast, isAuthenticated } = useAppData();
+  const { isAuthenticated, can, activeDossier, settings } = useAppData();
   const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
@@ -32,7 +31,7 @@ function AppInner() {
       }
       if (meta && e.key === '/') {
         e.preventDefault();
-        setIsSearchModalOpen(true);
+        if (can('search.run')) setIsSearchModalOpen(true);
         return;
       }
       if (e.key === 'Escape') {
@@ -42,13 +41,12 @@ function AppInner() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [can]);
 
   useEffect(() => {
     if (authChecked) {
-      if (!isAuthenticated && currentPath !== '/login') {
-        navigate('/login');
-      }
+      if (!isAuthenticated && currentPath !== '/login') navigate('/login');
+      if (isAuthenticated && currentPath === '/login') navigate('/dashboard');
     } else {
       setAuthChecked(true);
     }
@@ -56,39 +54,30 @@ function AppInner() {
 
   const handleVerificationComplete = useCallback(() => {
     setIsSearchModalOpen(false);
-    setLastSearchResult({
-      query: primaryProfile.idNumber,
-      profile: primaryProfile,
-      timestamp: new Date().toISOString(),
-      riskScore: primaryProfile.riskScore,
-    });
-    pushToast({
-      title: 'Verification complete',
-      description: `${primaryProfile.fullName} — Risk ${primaryProfile.riskScore}%`,
-      type: 'success',
-    });
     navigate('/identity-profile');
-  }, [setLastSearchResult, pushToast, navigate]);
+  }, [navigate]);
+
+  const onLogin = currentPath === '/login' || !isAuthenticated;
 
   return (
     <div className="min-h-screen min-h-[100dvh] bg-[#050b14] text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-black">
-      <Header
-        onOpenLiveSearch={() => setIsSearchModalOpen(true)}
-        onOpenCommandPalette={() => setIsCommandOpen(true)}
-      />
-      <div className="hidden md:block">
-        <PageNavigator />
-      </div>
-      <AppShell onOpenCommandPalette={() => setIsCommandOpen(true)}>
+      {!onLogin && (
+        <Header onOpenLiveSearch={() => setIsSearchModalOpen(true)} onOpenCommandPalette={() => setIsCommandOpen(true)} />
+      )}
+
+      {onLogin ? (
         <main className="flex-1 flex flex-col min-h-0 overflow-y-auto animate-page-enter">
           <PageRouter />
         </main>
-      </AppShell>
-      <SearchSimulationModal
-        isOpen={isSearchModalOpen}
-        onClose={() => setIsSearchModalOpen(false)}
-        onViewProfile={handleVerificationComplete}
-      />
+      ) : (
+        <AppShell onOpenCommandPalette={() => setIsCommandOpen(true)}>
+          <main className="flex-1 flex flex-col min-h-0 overflow-y-auto animate-page-enter">
+            <PageRouter />
+          </main>
+        </AppShell>
+      )}
+
+      <SearchSimulationModal isOpen={isSearchModalOpen} onClose={() => setIsSearchModalOpen(false)} onViewProfile={handleVerificationComplete} />
       <CommandPalette
         isOpen={isCommandOpen}
         onClose={() => setIsCommandOpen(false)}
@@ -98,6 +87,8 @@ function AppInner() {
         }}
       />
       <ToastContainer />
+      {/* Print-only, full-dataset rendering of the active dossier (hidden on screen). */}
+      <PrintReport dossier={activeDossier} settings={settings} />
     </div>
   );
 }

@@ -17,7 +17,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onOpenLiveSearch,
 }) => {
   const { navigate, currentPath } = useAppRouter();
-  const { pushToast } = useAppData();
+  const { pushToast, currentUser, can } = useAppData();
   const [query, setQuery] = useState('');
   const [selectedIdx, setSelectedIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -31,7 +31,16 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   }, [isOpen]);
 
   const actions = useMemo(() => {
-    const pageActions = platformRoutes.map((r) => ({
+    // Only routes this tier/permission set can actually open.
+    const reachable = platformRoutes.filter(
+      (r) =>
+        !r.public &&
+        currentUser &&
+        (!r.tiers || r.tiers.includes(currentUser.tier)) &&
+        (!r.permission || can(r.permission))
+    );
+
+    const pageActions = reachable.map((r) => ({
       id: r.id,
       label: r.title,
       description: r.description,
@@ -40,16 +49,18 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       type: 'page' as const,
     }));
 
-    const quickActions = [
-      {
-        id: 'live-verify',
-        label: 'Run Live Citizen ID Verification',
-        description: 'Cross-registry instant lookup via Spin Mobile',
-        path: '',
-        icon: iconMap.Sparkles || <ArrowRight size={15} />,
-        type: 'action' as const,
-      },
-    ];
+    const quickActions = can('search.run')
+      ? [
+          {
+            id: 'live-verify',
+            label: 'Run Live Citizen ID Verification',
+            description: 'Cross-registry instant lookup via Spin Mobile',
+            path: '',
+            icon: iconMap.Sparkles || <ArrowRight size={15} />,
+            type: 'action' as const,
+          },
+        ]
+      : [];
 
     const all = [...quickActions, ...pageActions];
     if (!query.trim()) return all;

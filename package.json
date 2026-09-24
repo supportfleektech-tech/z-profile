@@ -5,11 +5,23 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "server": "node server/index.mjs",
+    "dev:all": "node server/index.mjs & vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "db:reset": "node -e \"require('fs').rmSync('server/.data',{recursive:true,force:true});console.log('database cleared \u2014 reseeds on next start')\"",
+    "smoke:dom": "node scripts/smoke-dom.mjs",
+    "smoke:flows": "node scripts/smoke-flows.mjs",
+    "smoke:pdf": "SMOKE_DUMP_DIR=.smoke-artifacts node scripts/smoke-dom.mjs",
+    "verify": "npm run typecheck && npm run build && npm run smoke:api && npm run smoke:dom && npm run smoke:flows && npm run smoke:trace",
+    "smoke:trace": "node scripts/smoke-requirements.mjs",
+    "smoke:api": "node scripts/smoke-api.mjs"
   },
   "dependencies": {
     "clsx": "2.1.1",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "lucide-react": "^1.46.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",
@@ -21,9 +33,13 @@
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.1",
+    "jsdom": "^30.1.1",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
     "vite": "7.3.2",
     "vite-plugin-singlefile": "2.3.0"
+  },
+  "engines": {
+    "node": ">=22.5.0"
   }
 }

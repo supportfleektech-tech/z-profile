@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>IPRS Kenya - Trusted Identity & Background Intelligence Platform</title>
     <meta name="description" content="Kenya's Trusted Identity & Background Intelligence Platform. Verify, Investigate, Make Safer Decisions. Powered by Spin Mobile." />
     <meta name="theme-color" content="#050b14" />
@@ -16,6 +16,12 @@
   </head>
   <body>
     <div id="root"></div>
+    <!--
+      Print target. Hidden on screen; in @media print the app chrome is hidden and this
+      node becomes the only visible content, so window.print() emits the complete
+      extracted report rather than the dark dashboard UI. See src/components/report/PrintReport.tsx.
+    -->
+    <div id="print-root" aria-hidden="true"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
