@@ -121,8 +121,10 @@ function bootApp() {
 
 const results = [];
 const check = (name, cond, detail = '') => {
-  results.push({ name, ok: !!cond });
-  console.log(`${cond ? 'PASS' : 'FAIL'} ${name}${detail ? ' — ' + detail : ''}`);
+  const ok = !!cond;
+  results.push({ name, ok });
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ' — ' + detail : ''}`);
+  if (!ok) throw new Error(`Smoke assertion failed: ${name}`);
 };
 
 /* -------------------------------------------------------------------------- */
@@ -180,22 +182,23 @@ async function loginAs(app, email) {
 }
 
 async function main() {
+  const persistedPersonas = [];
   for (const p of PERSONAS) {
     console.log(`\n═══ ${p.label} (${p.email}) ═══`);
     const app = bootApp();
     await sleep(1500);
 
-    check(`${p.label}: app mounts`, (app.$('#root')?.childElementCount ?? 0) > 0);
-    check(`${p.label}: login screen renders`, /IPRS|sign in|email/i.test(app.text()));
-    check(`${p.label}: no boot errors`, app.errors.length === 0, app.errors.slice(0, 2).join(' | '));
+    check(`${p.label}: app mounts with a clean login screen`,
+      (app.$('#root')?.childElementCount ?? 0) > 0 && /IPRS|sign in|email/i.test(app.text()) && app.errors.length === 0,
+      app.errors.slice(0, 2).join(' | '));
 
     const ok = await loginAs(app, p.email);
     check(`${p.label}: signed in`, ok);
     if (!ok) { console.log(app.errors.slice(0, 3).join('\n')); continue; }
 
     const body = app.text();
-    check(`${p.label}: tier dashboard rendered`, p.expect.test(body), body.slice(0, 80).replace(/\s+/g, ' '));
-    check(`${p.label}: no errors after login`, app.errors.length === 0, app.errors.slice(0, 2).join(' | '));
+    check(`${p.label}: tier dashboard rendered without errors`, p.expect.test(body) && app.errors.length === 0,
+      `${body.slice(0, 80).replace(/\s+/g, ' ')} ${app.errors.slice(0, 2).join(' | ')}`);
 
     // Walk every route this persona should reach.
     let fails = 0;
@@ -211,6 +214,7 @@ async function main() {
       }
     }
     check(`${p.label}: ${p.routes.length} reachable routes render clean`, fails === 0, `${fails} failing`);
+    check(`${p.label}: route sweep produces no runtime errors`, app.errors.length === 0, app.errors.slice(0, 2).join(' | '));
 
     // Walk every route this persona must be blocked from.
     let leaks = 0;
@@ -250,9 +254,55 @@ async function main() {
       }
     }
 
-    // Persistence
+    if (p.label === 'Super Admin') {
+      check('Super Admin: skip link targets the application main landmark',
+        app.$('a[href="#main-content"]')?.textContent?.trim() === 'Skip to content' && app.$('main#main-content') !== null);
+      check('Super Admin: application exposes exactly one main landmark', app.$$('main').length === 1, String(app.$$('main').length));
+      check('Super Admin: error-boundary fallback marker ships in the built bundle',
+        loadBuild().code.includes('Something broke on this screen'));
+
+      await app.goto('/api-docs');
+      const machineTab = app.findButton('Machine API');
+      if (machineTab) app.click(machineTab);
+      await sleep(300);
+      check('Super Admin: Machine API tab exposes the scoped contract',
+        !!machineTab && /Machine API contract/.test(app.text()) && /pricing:read/.test(app.text()) && /401/.test(app.text()));
+      check('Super Admin: Machine API tab lists all four public routes',
+        ['/api/v1', '/api/v1/pricing', '/api/v1/wallet', '/api/v1/verify'].every((route) => app.text().includes(route)));
+      check('Super Admin: API key management tab remains available', !!app.findButtonExact?.('Keys') || app.buttons().some((button) => (button.textContent ?? '').trim().startsWith('Keys')));
+
+      await app.goto('/profile');
+      const securityTab = app.$$('[role="tab"]').find((tab) => (tab.textContent ?? '').trim().startsWith('Security'));
+      if (securityTab) app.click(securityTab);
+      await sleep(300);
+      check('Super Admin: session controls render current-device revocation',
+        /Your sessions/.test(app.text()) && /Revoke other sessions/.test(app.text()));
+
+      await app.goto('/settings');
+      const backupGroup = app.findButton('Backup & Recovery');
+      if (backupGroup) app.click(backupGroup);
+      await sleep(300);
+      check('Super Admin: backup panel exposes export and restore controls',
+        /Backend required/.test(app.text()) && /Download backup/.test(app.text()) && /Restore backup/.test(app.text()));
+      check('Super Admin: backup restore accepts versioned JSON files',
+        app.$('input[type="file"][accept*="application/json"]') !== null);
+    }
+
+    if (p.label === 'User · Analyst') {
+      await app.goto('/profile');
+      const security = app.$$('[role="tab"]').find((tab) => (tab.textContent ?? '').trim().startsWith('Security'));
+      if (security) app.click(security);
+      await sleep(300);
+      check('User · Analyst: self-service session controls render', /Your sessions/.test(app.text()) && /Revoke other sessions/.test(app.text()));
+      const notifications = app.$$('[role="tab"]').find((tab) => (tab.textContent ?? '').trim().startsWith('Notifications'));
+      if (notifications) app.click(notifications);
+      await sleep(300);
+      check('User · Analyst: notification channel matrix remains configurable',
+        /Delivery matrix/.test(app.text()) && /Webhook/.test(app.text()) && /SMS/.test(app.text()));
+    }
+
     const stored = app.window.localStorage.getItem(STORAGE_KEY);
-    check(`${p.label}: state persisted`, !!stored && stored.length > 500, stored ? `${(stored.length / 1024).toFixed(1)} KB` : 'empty');
+    persistedPersonas.push({ label: p.label, ok: !!stored && stored.length > 500, size: stored?.length ?? 0 });
 
     if (app.errors.length) {
       console.log(`   runtime errors (${app.errors.length}):`);
@@ -260,6 +310,8 @@ async function main() {
     }
     app.window.close();
   }
+  check('all personas: authenticated state persists', persistedPersonas.every((entry) => entry.ok),
+    persistedPersonas.map((entry) => `${entry.label}:${(entry.size / 1024).toFixed(1)}KB`).join(' '));
 
   /* ------------------- download + PDF proof (one instance) ------------------- */
   console.log('\n═══ Downloads ═══');

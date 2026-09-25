@@ -76,7 +76,7 @@ export interface DbState {
   activeDossier: Dossier;
   dossierCache: Record<string, Dossier>;
   /** Legacy search-result shape still consumed by older screens. */
-  lastSearch: { query: string; profile: import('../types').IdentityProfile; timestamp: string; riskScore: number } | null;
+  lastSearch: { query: string; profile: import('../types').IdentityProfile; timestamp: string; riskScore: number | null } | null;
 
   /* money */
   wallets: Wallet[];

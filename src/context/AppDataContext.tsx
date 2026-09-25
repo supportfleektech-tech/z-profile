@@ -47,7 +47,7 @@ export interface SearchResult {
   query: string;
   profile: IdentityProfile;
   timestamp: string;
-  riskScore: number;
+  riskScore: number | null;
 }
 
 interface AppDataContextType {
@@ -97,6 +97,8 @@ interface AppDataContextType {
   testingProviderId: string | null;
   createApiKey: (input: { label: string; scopes: string[]; providerId?: string; environment: 'sandbox' | 'live' }) => ReturnType<typeof providerService.createApiKey>;
   revokeApiKey: (id: string) => ReturnType<typeof providerService.revokeApiKey>;
+  createMachineApiKey: (input: { label: string; scopes: string[]; environment: 'sandbox' | 'live' }) => ReturnType<typeof providerService.createMachineApiKey>;
+  revokeMachineApiKey: (id: string) => ReturnType<typeof providerService.revokeMachineApiKey>;
   providerUsage: ReturnType<typeof providerService.usage>;
 
   /* ---- billing & pricing ---- */
@@ -148,7 +150,9 @@ interface AppDataContextType {
   audit: AuditEntry[];
   appendAudit: (entry: Omit<AuditEntry, 'id' | 'at'>) => AuditEntry;
   sessions: SessionRecord[];
+  refreshSessions: () => Promise<void>;
   revokeSession: (id: string) => ReturnType<typeof authService.revokeSession>;
+  revokeOtherSessions: () => ReturnType<typeof authService.revokeOtherSessions>;
 
   /* ---- activity & UI ---- */
   activities: ActivityItem[];
@@ -446,6 +450,24 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [me, pushToast]
   );
 
+  const createMachineApiKey = useCallback(
+    async (input: { label: string; scopes: string[]; environment: 'sandbox' | 'live' }) => {
+      const res = await providerService.createMachineApiKey(me, input);
+      pushToast({ title: res.ok ? 'Machine API key issued' : 'Rejected', description: res.message, type: res.ok ? 'success' : 'error' });
+      return res;
+    },
+    [me, pushToast]
+  );
+
+  const revokeMachineApiKey = useCallback(
+    async (id: string) => {
+      const res = await providerService.revokeMachineApiKey(me, id);
+      pushToast({ title: res.ok ? 'Machine API key revoked' : 'Rejected', description: res.message, type: res.ok ? 'warning' : 'error' });
+      return res;
+    },
+    [me, pushToast]
+  );
+
   /* ------------------------------ wallet & payments ------------------------------ */
 
   const wallet = useMemo(() => (me ? ensureWallet(me.id) : ensureWallet('__anonymous__')), [me]);
@@ -525,7 +547,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       else
         pushToast({
           title: 'Verification complete',
-          description: `${res.dossier?.subject.fullName} — score ${res.dossier?.risk.score}/100 · ${res.costKes ? `KES ${res.costKes.toLocaleString('en-KE')} debited` : ''}`,
+          description: `${res.dossier?.subject.fullName} — score ${res.dossier?.risk.score === null || res.dossier?.risk.score === undefined ? 'unavailable' : `${res.dossier.risk.score}/100`} · ${res.costKes ? `KES ${res.costKes.toLocaleString('en-KE')} debited` : ''}`,
           type: 'success',
         });
       return res;
@@ -557,14 +579,31 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [me, pushToast]
   );
 
+  const refreshSessions = useCallback(async () => {
+    if (!me) return;
+    await authService.listSessions(me);
+  }, [me]);
+
   const revokeSession = useCallback(
     async (id: string) => {
       const res = await authService.revokeSession(me, id);
       pushToast({ title: res.ok ? 'Session revoked' : 'Rejected', description: res.message, type: res.ok ? 'warning' : 'error' });
+      if (res.ok) await refreshSessions();
       return res;
     },
-    [me, pushToast]
+    [me, pushToast, refreshSessions]
   );
+
+  const revokeOtherSessions = useCallback(async () => {
+    const res = await authService.revokeOtherSessions(me);
+    pushToast({ title: res.ok ? 'Other sessions revoked' : 'Revocation rejected', description: res.message, type: res.ok ? 'warning' : 'error' });
+    if (res.ok) await refreshSessions();
+    return res;
+  }, [me, pushToast, refreshSessions]);
+
+  useEffect(() => {
+    if (me) void refreshSessions();
+  }, [me?.id, refreshSessions]);
 
   /* --------------------------------- derived --------------------------------- */
 
@@ -647,6 +686,8 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     testingProviderId,
     createApiKey,
     revokeApiKey,
+    createMachineApiKey,
+    revokeMachineApiKey,
     providerUsage,
 
     invoices: db.invoices,
@@ -693,7 +734,9 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     audit: db.audit,
     appendAudit: (e) => auditService.append(e),
     sessions: db.sessions,
+    refreshSessions,
     revokeSession,
+    revokeOtherSessions,
 
     activities: db.activities,
     addActivity: (title, type) => {

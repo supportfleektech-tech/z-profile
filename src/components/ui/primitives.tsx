@@ -460,7 +460,8 @@ export const Callout: React.FC<{
   children: React.ReactNode;
   icon?: React.ReactNode;
   className?: string;
-}> = ({ tone = 'info', title, children, icon, className }) => {
+  'data-testid'?: string;
+}> = ({ tone = 'info', title, children, icon, className, 'data-testid': testId }) => {
   const map: Record<BadgeTone, string> = {
     neutral: 'border-slate-600/40 bg-slate-500/5 text-slate-300',
     success: 'border-emerald-500/30 bg-emerald-500/5 text-emerald-200',
@@ -470,7 +471,7 @@ export const Callout: React.FC<{
     accent: 'border-cyan-500/30 bg-cyan-500/5 text-cyan-200',
   };
   return (
-    <div className={cn('rounded-lg border px-3 py-2.5 text-[11px] leading-relaxed flex gap-2 min-w-0', map[tone], className)}>
+    <div data-testid={testId} className={cn('rounded-lg border px-3 py-2.5 text-[11px] leading-relaxed flex gap-2 min-w-0', map[tone], className)}>
       {icon && <span className="shrink-0 mt-0.5">{icon}</span>}
       <div className="min-w-0">
         {title && <p className="font-semibold mb-0.5">{title}</p>}

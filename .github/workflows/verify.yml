@@ -6,7 +6,7 @@ on:
   pull_request:
 
 # The gate is the same one that guards local development: npm run verify runs
-# typecheck → build → API(58) → DOM(44) → write-flows(63) → traceability(76).
+# typecheck → lint → unit → build → API(114) → DOM(44) → write-flows(64) → traceability(96).
 # No browser binary is needed — the DOM suites drive the real built bundle inside jsdom.
 
 jobs:
@@ -21,11 +21,8 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Install
-        run: npm ci
-
-      - name: Verify (typecheck + build + 241 assertions)
-        run: npm run verify
+      - name: Install and verify (85 unit tests + 318 smoke assertions)
+        run: npm ci && npm run verify
 
       - name: Upload the single-file bundle
         uses: actions/upload-artifact@v4

@@ -1,6 +1,6 @@
 import type { ApiKeyRecord, ProviderConfig, ProviderFieldMapping, ProviderRequestLog, SystemUser } from '../types';
 import { getSnapshot, setState } from './db';
-import { apiOr } from './http';
+import { apiFirst, apiOr, probeApi } from './http';
 import { auditService } from './auth.service';
 import { can } from '../auth/permissions';
 import { isValidUrl, maskSecret, sleep, uid } from '../lib/format';
@@ -289,6 +289,33 @@ export const providerService = {
       detail: `Revoked API key "${key.label}"`,
     });
     return { ok: true };
+  },
+
+  async createMachineApiKey(
+    actor: SystemUser | null,
+    input: { label: string; scopes: string[]; environment: 'sandbox' | 'live' }
+  ): Promise<{ ok: boolean; key?: ApiKeyRecord; secret?: string; message?: string }> {
+    await probeApi();
+    const local = () => providerService.createApiKey(actor, input);
+    const result = await apiFirst('/api/api-keys', { method: 'POST', body: input }, local);
+    if (result.ok && result.key && actor) {
+      const serverKey = result.key as ApiKeyRecord;
+      const localKey: ApiKeyRecord = {
+        ...serverKey,
+        ownerId: actor.id,
+        createdAt: serverKey.createdAt ?? new Date().toISOString(),
+        status: 'active',
+      };
+      setState((prev) => ({ apiKeys: [localKey, ...prev.apiKeys.filter((item) => item.id !== localKey.id)] }));
+    }
+    return result;
+  },
+
+  async revokeMachineApiKey(actor: SystemUser | null, id: string): Promise<{ ok: boolean; message?: string }> {
+    const local = () => providerService.revokeApiKey(actor, id);
+    const result = await apiFirst(`/api/api-keys/${id}/revoke`, { method: 'POST' }, local);
+    if (result.ok) setState((prev) => ({ apiKeys: prev.apiKeys.map((key) => (key.id === id ? { ...key, status: 'revoked', revokedAt: new Date().toISOString() } : key)) }));
+    return result;
   },
 
   /** Aggregate usage/cost per provider for the Usage tab. */

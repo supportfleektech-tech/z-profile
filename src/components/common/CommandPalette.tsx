@@ -21,13 +21,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   const [query, setQuery] = useState('');
   const [selectedIdx, setSelectedIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (isOpen) {
+      triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       setQuery('');
       setSelectedIdx(0);
-      setTimeout(() => inputRef.current?.focus(), 50);
+      const t = setTimeout(() => inputRef.current?.focus(), 50);
+      return () => {
+        clearTimeout(t);
+        if (triggerRef.current?.isConnected) triggerRef.current.focus();
+      };
     }
+    return undefined;
   }, [isOpen]);
 
   const actions = useMemo(() => {

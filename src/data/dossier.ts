@@ -585,6 +585,7 @@ export const primaryDossier: Dossier = {
   id: 'DOS-2026-00921',
   reportId: 'IPRS-R-2026-23456789',
   generatedAt: GENERATED_AT,
+  dataMode: 'simulated',
   subject: {
     fullName: 'John Mwangi Kamau',
     firstName: 'John',
@@ -596,9 +597,8 @@ export const primaryDossier: Dossier = {
     dobRaw: '1990-05-15',
     nationality: 'Kenyan (by birth)',
     idNumber: '23456789',
-    idType: 'National Identity Card (2nd generation)',
-    passportNumber: 'A0912347B',
-    kraPin: 'A123456789K',
+     idType: 'National Identity Card (2nd generation)',
+     kraPin: 'A123456789K',
     phone: '0712 345 678',
     altPhones: ['0733 908 112'],
     email: 'j.mwangi.kamau@protonmail.com',
@@ -606,10 +606,9 @@ export const primaryDossier: Dossier = {
     nextOfKin: 'Mary Wanjiru Kamau (spouse) — 0722 441 908',
     county: 'Nairobi',
     subCounty: 'Westlands',
-    constituency: 'Westlands',
-    ward: 'Kitisuru',
-    registrationSerial: 'KE-2345-6789-114',
-    photoMatchScore: 97.4,
+     constituency: 'Westlands',
+     ward: 'Kitisuru',
+     photoMatchScore: 97.4,
     deceased: false,
   },
   addresses: [
@@ -896,6 +895,8 @@ export function dossierForQuery(query: string, fullName?: string, idNumber?: str
     lastName: last,
     aliases: [`${first[0]}. ${last.toUpperCase()}`],
     idNumber: seed.idNumber,
+    passportNumber: undefined,
+    registrationSerial: undefined,
     phone: seed.phone,
     county: seed.county,
     subCounty: seed.county,
@@ -964,6 +965,20 @@ export function dossierForQuery(query: string, fullName?: string, idNumber?: str
 
 /** Legacy profile shape derived from a dossier — keeps the profile header working. */
 export function dossierToProfile(d: Dossier): IdentityProfile {
+  const sectionFor = (id: string, tokens: string[]) => d.sections.find((section) => section.id === id || tokens.some((token) => section.id.includes(token)));
+  const stateLabel = (state: DossierSection['state']): string => {
+    if (state === 'verified') return 'Verified';
+    if (state === 'partial') return 'Partial';
+    if (state === 'mismatch') return 'Mismatch';
+    if (state === 'not_found') return 'Not found';
+    return 'Unknown';
+  };
+  const providerStatus = (section: DossierSection | undefined): string => section ? stateLabel(section.state) : 'Unknown';
+  const kra = sectionFor('sec-kra', ['kra']);
+  const mpesa = sectionFor('sec-mpesa', ['mpesa', 'sim_swap', 'phone_search', 'hakikisha']);
+  const crb = sectionFor('sec-crb', ['crb', 'credit', 'metropol', 'creditinfo']);
+  const employer = sectionFor('sec-employer', ['employer', 'full_kyc']);
+  const kplc = sectionFor('sec-utility', ['kplc', 'utility']);
   return {
     id: d.id,
     fullName: d.subject.fullName,
@@ -974,25 +989,16 @@ export function dossierToProfile(d: Dossier): IdentityProfile {
     nationality: d.subject.nationality,
     county: d.subject.county,
     kraPin: d.subject.kraPin,
-    avatarUrl: '/images/avatar-john.jpg',
-    isVerified: d.risk.score >= 60,
+    isVerified: d.risk.score !== null && d.risk.score >= 60,
     riskScore: d.risk.score,
-    trustLevel: d.risk.band === 'Low' ? 'High' : d.risk.band === 'Medium' ? 'Medium' : 'Low',
+    trustLevel: d.risk.band === 'Low' ? 'High' : d.risk.band === 'Medium' ? 'Medium' : d.risk.band === 'High' ? 'Low' : 'Unknown',
     providers: {
-      kra: { verified: d.tax.goodStanding, status: d.tax.goodStanding ? 'Verified' : 'Flagged', pin: d.tax.pin, taxCompliance: d.tax.goodStanding },
-      mpesa: { verified: true, status: 'Verified', accountName: d.mobileMoney.accountName, activeSince: d.mobileMoney.activeSince },
-      crb: { verified: !d.screening.insolvency, status: d.credit.listingStatus, score: d.credit.score, defaultStatus: d.credit.listingStatus },
-      employer: { verified: true, status: 'Verified', company: d.employment[0]?.company ?? '—', position: d.employment[0]?.position ?? '—' },
-      kplc: { verified: d.utility.arrearsKes === 0, status: d.utility.accountStatus, meterNumber: d.utility.meterNumber, activeAccount: d.utility.accountStatus === 'Active' },
+      kra: { verified: kra?.state === 'verified', status: providerStatus(kra), pin: d.tax.pin, taxCompliance: kra?.state === 'verified' },
+      mpesa: { verified: mpesa?.state === 'verified', status: providerStatus(mpesa), accountName: d.mobileMoney.accountName || 'Unknown', activeSince: d.mobileMoney.activeSince || 'Unknown' },
+      crb: { verified: crb?.state === 'verified', status: providerStatus(crb), score: d.credit.score, defaultStatus: providerStatus(crb) },
+      employer: { verified: employer?.state === 'verified', status: providerStatus(employer), company: d.employment[0]?.company ?? 'Unknown', position: d.employment[0]?.position ?? 'Unknown' },
+      kplc: { verified: kplc?.state === 'verified', status: providerStatus(kplc), meterNumber: d.utility.meterNumber || 'Unknown', activeAccount: d.utility.accountStatus === 'Active' },
     },
-    keyFindings: [
-      d.tax.goodStanding ? 'Valid KRA PIN with active tax compliance' : 'KRA principal tax debt outstanding',
-      `Active M-PESA account since ${d.mobileMoney.activeSince}`,
-      d.credit.adverseListings.length === 0 ? 'No negative CRB listings' : `${d.credit.adverseListings.length} adverse CRB listing(s)`,
-      `Current employer verified — ${d.employment[0]?.company ?? 'n/a'}`,
-      d.utility.arrearsKes === 0 ? 'Active KPLC account with no arrears' : 'KPLC arrears recorded',
-      d.screening.pep ? 'PEP status identified' : 'Clear PEP & sanctions screening',
-      d.screening.criminalRecords.length === 0 ? 'No criminal or civil court records' : `${d.screening.criminalRecords.length} court record(s)`,
-    ],
+    keyFindings: d.sections.filter((section) => section.id !== 'sec-risk').map((section) => `${section.provider}: ${stateLabel(section.state)}`),
   };
 }

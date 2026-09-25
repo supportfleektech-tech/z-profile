@@ -1,7 +1,7 @@
 > **STATUS — EXECUTED.** Every item below shipped on branch `arena/01a0cbfb-z-profile`
 > (PR #1). The "current state" audit sections describe the ORIGINAL code, kept as
 > history. Authoritative truth now lives in: `README.md`, `AGENTS.md`,
-> `docs/MANUAL_TEST_CHECKLIST.md`, and the `npm run verify` gate (231 assertions).
+> `docs/MANUAL_TEST_CHECKLIST.md`, and the `npm run verify` gate (397 assertions).
 > Pricing update since this plan was written: the proposal extract arrived and the
 > 0–500 batch is transcribed — 15 of 25 rates confirmed, 10 still flagged (no KYB /
 > vehicle / criminal / deceased rates were quoted).
@@ -20,7 +20,7 @@ touched, and the acceptance test.
 
 | Area | Finding |
 |---|---|
-| Stack | React 19 + Vite 7 + Tailwind 4, `vite-plugin-singlefile` (whole app inlines into one HTML). No router lib — custom hash router. No backend. |
+| Stack | React 19 + Vite 6 + Tailwind 4, `vite-plugin-singlefile` (whole app inlines into one HTML). No router lib — custom hash router. No backend. |
 | State | `src/context/AppDataContext.tsx` — 318 lines, holds *everything* (auth, cases, users, providers, invoices, toasts, UI flags). `useState` only, **no persistence**: a refresh resets the world. |
 | Auth | `isAuthenticated` initialised to `true`; `login()` ignores the password and falls back to `initialUsers[0]` for any unknown email. Effectively no authentication. |
 | Roles | Flat union `'Super Admin' \| 'Analyst' \| 'Officer' \| 'Viewer' \| 'Billing'`. **No permission model.** Every role sees the identical dashboard, nav, and admin console. |

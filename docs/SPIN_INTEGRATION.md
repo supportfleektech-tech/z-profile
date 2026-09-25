@@ -13,7 +13,7 @@ platform now consumes it. The machine-readable outcome of this review is
 | **Auth** | `POST {base}/analytics/auth/` with `{consumer_key, consumer_secret}` → `{token, expires}`. Token valid **~10 minutes**. Credentials live in the dashboard under *Setup → API Keys*. | `server/spin.mjs` caches the token until 60 s before expiry; engages live mode when `SPIN_CONSUMER_KEY`/`SPIN_CONSUMER_SECRET` are set. The Provider Management rows carry `consumerKey` / `consumerSecret` / `tokenUrl = /analytics/auth/`. |
 | **Search call** | `POST {base}/analytics/…`, `Authorization: Bearer <token>`, JSON body `{ search_type, identifier, consent, consent_collected_by }` (+ per-module extras). | Every catalogue item maps to a `search_type` (shown as a badge in New Search); consent captured at search time maps to `consent` / `consent_collected_by`. |
 | **Environments** | Sandbox and production share **one base URL — only the keys differ**. | `SPIN_BASE_URL` (default `https://api.spinmobile.co`); mode visible at `GET /api/health → spin.mode`. |
-| **Response envelopes** | Two shapes: analytics `{ code: "200.001", data: {…} }` and verification `{ response_code: "200", success, message, data: {…} }`. | Documented per module in the registry; provider logs and dossier payloads use these shapes. |
+| **Response envelopes** | Two shapes: analytics `{ code: "200.001", data: {…} }` and verification `{ response_code: "200", success, message, data: {…} }`. | `normalizeResponse()` accepts both; non-success envelopes and non-2xx responses become honest provider errors, never fabricated dossiers. |
 | **Errors** | Kenya docs carry a dedicated Errors page (envelope-level failure codes). | Live-mode failures surface as errors/`502`-style outcomes — never fabricated success. |
 
 ## 2. Module catalogue (Kenya) — docs → system mapping
@@ -58,7 +58,7 @@ priced **34/34 confirmed** and the provisional banners have dropped.
 
 | Layer | File | What it does |
 |---|---|---|
-| Module registry | `src/data/spinModules.ts` | All 21 documented modules: `search_type`, endpoint, identifier, request/response params, priced-item mapping, fidelity flags, `spinRequestBody()` builder. |
+| Module registry | `src/data/spinModules.ts` | All 24 documented modules: `search_type`, endpoint, identifier, request/response params, priced-item mapping, fidelity flags, `spinRequestBody()` builder. |
 | Live adapter | `server/spin.mjs` | Token caching (`/analytics/auth/`, ~10 min TTL), per-module `search()` execution, `describe()` for health. |
 | Modules API | `GET /api/spin/modules` | Registry as JSON (`providers.view` permission). |
 | Health | `GET /api/health` | `spin: { mode, baseUrl, missing[], configured, modules }` alongside the Daraja `gateway`. |
@@ -75,7 +75,10 @@ SPIN_BASE_URL=…         # only if onboarding provides a different host
 
 Until then everything runs modelled — and the modelled responses keep the exact field
 shapes documented above, so swapping in live credentials changes the transport, not the
-contracts.
+contracts. Live results are normalized through the machine verification transaction, which
+requires explicit consent, applies catalogue pricing, debits the owner wallet, and refunds
+provider failures. Missing provider values remain `Unknown`/`Unavailable` in the profile,
+report, print, and PDF paths; provider-present values remain visible.
 
 ## 5. Honest gaps
 

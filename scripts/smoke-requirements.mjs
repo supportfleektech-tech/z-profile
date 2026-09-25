@@ -21,13 +21,17 @@
  *  deliberately unreachable (fetch throws) so this exercises the LOCAL adapter.
  * ─────────────────────────────────────────────────────────────────────────────
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { bootApp, loginAs, check, summarise, sleep, STORAGE_KEY } from './lib/app.mjs';
 import { platformRoutes } from '../src/types/routes.ts';
 import { pricingCatalog, pricingProvenance } from '../src/data/pricing.ts';
 import { spinModuleForItem } from '../src/data/spinModules.ts';
+import { FixedWindowRateLimiter } from '../server/ratelimit.mjs';
 
-const DIST = new URL('../dist/index.html', import.meta.url).pathname;
+const DIST = fileURLToPath(new URL('../dist/index.html', import.meta.url));
 const pass = (name, cond, detail = '') => check(name, cond, detail);
 
 /* ════════════════════ REQ #1 — blueprint / mobile view removed ════════════════════ */
@@ -391,6 +395,53 @@ const pass = (name, cond, detail = '') => check(name, cond, detail);
   await app.goto('/pricing');
   await app.waitFor(() => /Unit price/i.test(app.$('main')?.textContent ?? ''), { label: 'pricing renders' });
   pass('pricing: Pricing & Tiers no longer shows a provisional banner', !/rates confirmed from the proposal\?|Provisional rates/i.test(app.$('main')?.textContent ?? '') && !/of 34 rates confirmed from the proposal/i.test(app.$('main')?.textContent ?? ''));
+}
+
+{
+  const migrationDir = mkdtempSync(path.join(tmpdir(), 'iprs-trace-db-'));
+  const previousDb = process.env.IPRS_DB;
+  process.env.IPRS_DB = path.join(migrationDir, 'trace.sqlite');
+  const dbModule = await import('../server/db.mjs');
+  try {
+    const version = Number(dbModule.db.prepare('PRAGMA user_version').get().user_version);
+    pass('migration: trace database reaches schema baseline 1', version === 1, `user_version=${version}`);
+    pass('migration: registered migration list is forward-only and ordered', dbModule.migrations.every((migration, index, list) => migration.version === index + 1 && (!index || migration.version > list[index - 1].version)));
+    const backup = dbModule.createBackup();
+    pass('backup: trace export is versioned and excludes transient collections', backup.format === 'iprs-backup' && backup.version === 1 && !backup.data.sessions && !backup.data.stk_pending);
+    let rejected = false;
+    try { dbModule.validateBackup({ ...backup, version: 99 }); } catch { rejected = true; }
+    pass('backup: trace validation rejects unsupported versions before restore', rejected);
+  } finally {
+    dbModule.db.close();
+    if (previousDb === undefined) delete process.env.IPRS_DB;
+    else process.env.IPRS_DB = previousDb;
+    rmSync(migrationDir, { recursive: true, force: true });
+  }
+}
+
+{
+  const bundle = readFileSync(DIST, 'utf8');
+  const app = bootApp();
+  await sleep(1600);
+  await loginAs(app, 'superadmin@iprs.co.ke');
+  pass('machine-api: traceability renders all six least-privilege scopes', ['pricing:read', 'wallet:read', 'verify:run', 'verify:read', 'report:read', 'wallet:debit'].every((scope) => bundle.includes(scope)));
+  pass('machine-api: traceability renders discovery, pricing, wallet, and verify routes', ['/api/v1', '/api/v1/pricing', '/api/v1/wallet', '/api/v1/verify'].every((route) => bundle.includes(route)));
+  pass('machine-api: traceability documents 401/403/402/429 error contracts', ['401', '403', '402', '429'].every((status) => bundle.includes(status)));
+  pass('webhook: built API documentation names the tokenized callback route', bundle.includes('/api/wallet/topup/mpesa/callback/:token'));
+  pass('banner: local build omits the optional Pages-only demo banner', !bundle.includes('Demo environment — data is simulated'));
+  const limiter = new FixedWindowRateLimiter({ limit: 2, windowMs: 1000, now: () => 1000 });
+  pass('rate-limit: traceability exercises allow, exhaust, and reject metadata', limiter.hit('trace').allowed && limiter.hit('trace').remaining === 0 && !limiter.hit('trace').allowed);
+  await app.goto('/profile');
+  const security = app.findTab('Security');
+  if (security) app.click(security);
+  await sleep(250);
+  const sessionsVisible = /Your sessions/.test(app.text());
+  await app.goto('/settings');
+  const backupGroup = app.findButton('Backup & Recovery');
+  if (backupGroup) app.click(backupGroup);
+  await sleep(250);
+  pass('session/backup: traceability finds session controls and Super-Admin backup panel', sessionsVisible && /Download backup/.test(app.text()) && /Restore backup/.test(app.text()));
+  app.window.close();
 }
 
 const fails = summarise('REQUIREMENT TRACEABILITY');

@@ -12,6 +12,7 @@
  */
 
 import { DatabaseSync } from 'node:sqlite';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,7 +51,7 @@ db.exec('PRAGMA foreign_keys = ON;');
 /*                                   schema                                    */
 /* -------------------------------------------------------------------------- */
 
-db.exec(`
+const CREATE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS users (
   id            TEXT PRIMARY KEY,
   name          TEXT NOT NULL,
@@ -167,8 +168,10 @@ CREATE INDEX IF NOT EXISTS idx_plogs_provider ON provider_logs(provider_id, at D
 
 CREATE TABLE IF NOT EXISTS api_keys (
   id TEXT PRIMARY KEY, label TEXT NOT NULL, prefix TEXT NOT NULL,
+  secret_hash TEXT, scopes TEXT NOT NULL DEFAULT '[]',
   provider_id TEXT, owner_id TEXT, status TEXT NOT NULL DEFAULT 'active',
-  environment TEXT NOT NULL DEFAULT 'sandbox', doc TEXT NOT NULL
+  environment TEXT NOT NULL DEFAULT 'sandbox', last_used_at TEXT, revoked_at TEXT,
+  doc TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS audit (
@@ -254,7 +257,97 @@ CREATE TABLE IF NOT EXISTS stk_pending (
   cancelled INTEGER NOT NULL DEFAULT 0,
   result TEXT
 );
-`);
+`;
+
+const REQUIRED_TABLES = [
+  'users', 'wallets', 'wallet_transactions', 'payments', 'payment_methods', 'providers', 'provider_logs', 'api_keys',
+  'audit', 'sessions', 'usage', 'cases', 'invoices', 'notifications', 'activities', 'kv', 'stk_pending',
+];
+
+const REQUIRED_COLUMNS = {
+  users: ['id', 'email', 'password', 'tier', 'doc'],
+  wallets: ['id', 'user_id', 'balance', 'doc'],
+  wallet_transactions: ['id', 'wallet_id', 'user_id', 'doc'],
+  payments: ['id', 'user_id', 'status', 'doc'],
+  payment_methods: ['id', 'user_id', 'doc'],
+  providers: ['id', 'name', 'code', 'doc'],
+  provider_logs: ['id', 'provider_id', 'doc'],
+  api_keys: ['id', 'label', 'prefix', 'secret_hash', 'scopes', 'doc'],
+  audit: ['id', 'at', 'actor_id', 'doc'],
+  sessions: ['id', 'user_id', 'current', 'doc'],
+  usage: ['id', 'at', 'user_id', 'doc'],
+  cases: ['id', 'case_id', 'doc'],
+  invoices: ['id', 'invoice_no', 'doc'],
+  notifications: ['id', 'user_id', 'doc'],
+  activities: ['id', 'at', 'doc'],
+  kv: ['k', 'v', 'updated_at'],
+  stk_pending: ['checkout_request_id', 'merchant_request_id', 'user_id', 'result'],
+};
+
+function hasRequiredSchema(database) {
+  return REQUIRED_TABLES.every((table) => {
+    const columns = database.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name);
+    return REQUIRED_COLUMNS[table].every((column) => columns.includes(column));
+  });
+}
+
+const CURRENT_SCHEMA_VERSION = 1;
+export const migrations = [
+  {
+    version: 1,
+    up(database) {
+      database.exec(CREATE_SCHEMA_SQL);
+    },
+  },
+];
+
+function ensureApiKeyColumns(database) {
+  const columns = database.prepare('PRAGMA table_info(api_keys)').all();
+  if (!columns.some((column) => column.name === 'secret_hash')) database.exec('ALTER TABLE api_keys ADD COLUMN secret_hash TEXT');
+  if (!columns.some((column) => column.name === 'scopes')) database.exec("ALTER TABLE api_keys ADD COLUMN scopes TEXT NOT NULL DEFAULT '[]'");
+  if (!columns.some((column) => column.name === 'last_used_at')) database.exec('ALTER TABLE api_keys ADD COLUMN last_used_at TEXT');
+  if (!columns.some((column) => column.name === 'revoked_at')) database.exec('ALTER TABLE api_keys ADD COLUMN revoked_at TEXT');
+}
+
+export function migrateDb(database = db) {
+  const from = Number(database.prepare('PRAGMA user_version').get().user_version ?? 0);
+  if (from > CURRENT_SCHEMA_VERSION) throw new Error(`Database schema version ${from} is newer than supported version ${CURRENT_SCHEMA_VERSION}.`);
+  if (from === CURRENT_SCHEMA_VERSION) return { from, to: from, stamped: false };
+
+  const completeUnversioned = hasRequiredSchema(database);
+  if (completeUnversioned) {
+    ensureApiKeyColumns(database);
+    database.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION};`);
+    return { from, to: CURRENT_SCHEMA_VERSION, stamped: true };
+  }
+
+  for (const migration of migrations.filter((item) => item.version > from).sort((a, b) => a.version - b.version)) {
+    database.exec('BEGIN');
+    try {
+      migration.up(database);
+      ensureApiKeyColumns(database);
+      if (!hasRequiredSchema(database)) throw new Error('Database is missing required schema columns.');
+      database.exec(`PRAGMA user_version = ${migration.version};`);
+      database.exec('COMMIT');
+    } catch (error) {
+      database.exec('ROLLBACK');
+      throw error;
+    }
+  }
+  return { from, to: CURRENT_SCHEMA_VERSION, stamped: false };
+}
+
+migrateDb();
+
+function ensureApiKeyColumn(name, definition) {
+  const columns = db.prepare('PRAGMA table_info(api_keys)').all();
+  if (!columns.some((column) => column.name === name)) db.exec(`ALTER TABLE api_keys ADD COLUMN ${name} ${definition}`);
+}
+
+ensureApiKeyColumn('secret_hash', 'TEXT');
+ensureApiKeyColumn('scopes', "TEXT NOT NULL DEFAULT '[]'");
+ensureApiKeyColumn('last_used_at', 'TEXT');
+ensureApiKeyColumn('revoked_at', 'TEXT');
 
 /* -------------------------------------------------------------------------- */
 /*                              row <-> doc mapping                            */
@@ -442,16 +535,26 @@ export function putProviderLog(l) {
 export function apiKeys() {
   return db.prepare('SELECT doc FROM api_keys ORDER BY label ASC').all().map((r) => j(r.doc));
 }
+export function apiKeyById(id) {
+  return rowDoc(db.prepare('SELECT doc FROM api_keys WHERE id = ?').get(id));
+}
 export function putApiKey(k) {
+  const { secret, ...record } = k;
+  const secretHash = record.secretHash ?? (secret ? createHash('sha256').update(secret).digest('hex') : null);
+  const safe = { ...record, secretHash };
   db.prepare(
-    `INSERT INTO api_keys (id,label,prefix,provider_id,owner_id,status,environment,doc)
-     VALUES (@id,@label,@prefix,@provider_id,@owner_id,@status,@environment,@doc)
-     ON CONFLICT(id) DO UPDATE SET label=@label,status=@status,environment=@environment,doc=@doc`
+    `INSERT INTO api_keys (id,label,prefix,secret_hash,scopes,provider_id,owner_id,status,environment,last_used_at,revoked_at,doc)
+     VALUES (@id,@label,@prefix,@secret_hash,@scopes,@provider_id,@owner_id,@status,@environment,@last_used_at,@revoked_at,@doc)
+     ON CONFLICT(id) DO UPDATE SET label=@label,prefix=@prefix,secret_hash=@secret_hash,scopes=@scopes,
+      provider_id=@provider_id,owner_id=@owner_id,status=@status,environment=@environment,
+      last_used_at=@last_used_at,revoked_at=@revoked_at,doc=@doc`
   ).run({
-    id: k.id, label: k.label, prefix: k.prefix, provider_id: k.providerId ?? null, owner_id: k.ownerId ?? null,
-    status: k.status, environment: k.environment ?? 'sandbox', doc: JSON.stringify(k),
+    id: safe.id, label: safe.label, prefix: safe.prefix, secret_hash: secretHash, scopes: JSON.stringify(safe.scopes ?? []),
+    provider_id: safe.providerId ?? null, owner_id: safe.ownerId ?? null, status: safe.status,
+    environment: safe.environment ?? 'sandbox', last_used_at: safe.lastUsedAt ?? null,
+    revoked_at: safe.revokedAt ?? null, doc: JSON.stringify(safe),
   });
-  return k;
+  return safe;
 }
 
 export function auditLog(filter = {}) {
@@ -508,7 +611,8 @@ export function putUsage(u) {
   db.prepare(
     `INSERT INTO usage (id,at,user_id,provider_id,check_type,cost_kes,status,latency_ms,doc)
      VALUES (@id,@at,@user_id,@provider_id,@check_type,@cost_kes,@status,@latency_ms,@doc)
-     ON CONFLICT(id) DO UPDATE SET doc=@doc`
+     ON CONFLICT(id) DO UPDATE SET at=@at,user_id=@user_id,provider_id=@provider_id,check_type=@check_type,
+      cost_kes=@cost_kes,status=@status,latency_ms=@latency_ms,doc=@doc`
   ).run({
     id: u.id, at: u.at, user_id: u.userId, provider_id: u.providerId, check_type: u.checkType ?? '',
     cost_kes: u.costKes ?? 0, status: u.status, latency_ms: u.latencyMs ?? 0, doc: JSON.stringify(u),
@@ -549,6 +653,216 @@ export const settings = () => kvGet('settings', defaultSettings);
 export const saveSettings = (s) => kvSet('settings', s);
 export const pricing = () => kvGet('pricing', pricingCatalog);
 export const savePricing = (p) => kvSet('pricing', p);
+
+const BACKUP_COLLECTIONS = [
+  ['users', 'users'],
+  ['wallets', 'wallets'],
+  ['walletTransactions', 'wallet_transactions'],
+  ['payments', 'payments'],
+  ['paymentMethods', 'payment_methods'],
+  ['providers', 'providers'],
+  ['providerLogs', 'provider_logs'],
+  ['apiKeys', 'api_keys'],
+  ['audit', 'audit'],
+  ['usage', 'usage'],
+  ['cases', 'cases'],
+  ['invoices', 'invoices'],
+  ['notifications', 'notifications'],
+  ['activities', 'activities'],
+];
+
+const BACKUP_SECRET_KEYS = new Set([
+  'password', 'passwordHash', 'secret', 'secretHash', 'secretMasked', 'authSecret', 'callbackToken', 'authToken',
+  'consumerSecret', 'webhookSecret', 'smsApiKey', 'mpesaPasskey', 'token', 'apiKey', 'accessToken',
+]);
+
+function isSecretKey(key) {
+  return BACKUP_SECRET_KEYS.has(key) || /(?:password|passkey|secret|credential|privateKey)/i.test(key);
+}
+
+function containsBackupSecret(value) {
+  if (Array.isArray(value)) return value.some(containsBackupSecret);
+  if (!value || typeof value !== 'object') return false;
+  return Object.entries(value).some(([key, item]) => isSecretKey(key) || containsBackupSecret(item));
+}
+
+function mergePreservedSecrets(current, incoming) {
+  if (Array.isArray(incoming)) {
+    return incoming.map((item, index) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+      const currentItem = current?.find?.((candidate) => candidate?.id === item.id) ?? current?.[index];
+      return mergePreservedSecrets(currentItem, item);
+    });
+  }
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return incoming;
+  const merged = { ...incoming };
+  if (!current || typeof current !== 'object' || Array.isArray(current)) return merged;
+  for (const [key, value] of Object.entries(current)) {
+    if (isSecretKey(key)) {
+      if (!(key in merged)) merged[key] = value;
+    } else if (merged[key] && typeof merged[key] === 'object' && value && typeof value === 'object') {
+      merged[key] = mergePreservedSecrets(value, merged[key]);
+    }
+  }
+  return merged;
+}
+
+function redactBackupValue(value) {
+  if (Array.isArray(value)) return value.map(redactBackupValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !isSecretKey(key)).map(([key, item]) => [key, redactBackupValue(item)]));
+}
+
+function backupRows(database, table) {
+  return database.prepare(`SELECT doc FROM ${table} ORDER BY rowid ASC`).all().map((row) => JSON.parse(row.doc));
+}
+
+function backupKv(database, key, fallback) {
+  const row = database.prepare('SELECT v FROM kv WHERE k = ?').get(key);
+  return row ? JSON.parse(row.v) : fallback;
+}
+
+export function createBackup(database = db) {
+  const data = Object.fromEntries(BACKUP_COLLECTIONS.map(([name, table]) => [name, redactBackupValue(backupRows(database, table))]));
+  data.settings = redactBackupValue(backupKv(database, 'settings', defaultSettings));
+  data.pricing = redactBackupValue(backupKv(database, 'pricing', pricingCatalog));
+  return { format: 'iprs-backup', version: 1, data };
+}
+
+function assertStableId(value, collection) {
+  if (typeof value !== 'string' || !value.trim() || value.length > 128 || /\s/.test(value)) {
+    throw new Error(`Backup ${collection} contains a malformed id.`);
+  }
+}
+
+export function validateBackup(payload) {
+  if (!payload || typeof payload !== 'object') throw new Error('Backup payload must be an object.');
+  if (payload.format !== 'iprs-backup') throw new Error('Unsupported backup format.');
+  if (payload.version !== 1) throw new Error(`Unsupported backup version: ${String(payload.version)}.`);
+  const data = payload.data;
+  if (!data || typeof data !== 'object') throw new Error('Backup data is required.');
+  const allowed = new Set([...BACKUP_COLLECTIONS.map(([name]) => name), 'settings', 'pricing']);
+  for (const key of Object.keys(data)) {
+    if (!allowed.has(key)) throw new Error(`Backup data contains unsupported collection: ${key}.`);
+  }
+  for (const [name] of BACKUP_COLLECTIONS) {
+    if (!Array.isArray(data[name])) throw new Error(`Backup data requires an array: ${name}.`);
+    const ids = new Set();
+    for (const record of data[name]) {
+      if (!record || typeof record !== 'object') throw new Error(`Backup ${name} contains a malformed record.`);
+      assertStableId(record.id, name);
+      if (ids.has(record.id)) throw new Error(`Backup ${name} contains duplicate id: ${record.id}.`);
+      ids.add(record.id);
+    }
+  }
+  if (!data.settings || typeof data.settings !== 'object' || Array.isArray(data.settings)) throw new Error('Backup data requires settings.');
+  if (!data.pricing || typeof data.pricing !== 'object' || Array.isArray(data.pricing)) throw new Error('Backup data requires pricing.');
+  if (containsBackupSecret(data)) throw new Error('Backup payload contains credential material.');
+  return data;
+}
+
+function restoreKv(database, key, value, preserveSecrets = false) {
+  const current = database.prepare('SELECT v FROM kv WHERE k = ?').get(key);
+  const restored = preserveSecrets && current ? mergePreservedSecrets(JSON.parse(current.v), value) : value;
+  database.prepare('INSERT INTO kv (k,v,updated_at) VALUES (?,?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v,updated_at=excluded.updated_at').run(key, JSON.stringify(restored), new Date().toISOString());
+}
+
+function restoreUser(database, record, existingPasswords) {
+  const password = existingPasswords.get(record.id) || hashPassword(`Restored-${record.id}-${randomUUID()}`);
+  database.prepare(`INSERT INTO users (id,name,email,password,phone,department,job_title,tier,sub_role,status,is_system,mfa_enabled,avatar_url,created_at,last_login_at,last_login_ip,failed_logins,locked_until,wallet_id,overrides,ip_allowlist,doc)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    record.id, record.name, record.email, password, record.phone ?? '', record.department ?? '', record.jobTitle ?? '', record.tier,
+    record.subRole ?? 'analyst', record.status ?? 'Active', record.isSystem ? 1 : 0, record.mfaEnabled ? 1 : 0, record.avatarUrl ?? null,
+    record.createdAt, record.lastLoginAt ?? null, record.lastLoginIp ?? null, record.failedLoginAttempts ?? 0, record.lockedUntil ?? null,
+    record.walletId ?? null, JSON.stringify(record.permissionOverrides ?? {}), JSON.stringify(record.ipAllowlist ?? []), JSON.stringify({ ...redactBackupValue(record), password }),
+  );
+}
+
+function restoreRows(database, data, existingPasswords, existingApiKeyHashes, existingProviders) {
+  for (const user of data.users) restoreUser(database, user, existingPasswords);
+  for (const wallet of data.wallets) {
+    database.prepare(`INSERT INTO wallets (id,user_id,currency,balance,held,lifetime_top,lifetime_spend,auto_topup,auto_trigger,auto_amount,low_alert,overdraft,updated_at,doc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      wallet.id, wallet.userId, wallet.currency ?? 'KES', wallet.balance ?? 0, wallet.held ?? 0, wallet.lifetimeTopUp ?? 0, wallet.lifetimeSpend ?? 0,
+      wallet.autoTopUp ? 1 : 0, wallet.autoTopUpTriggerKes ?? 0, wallet.autoTopUpAmountKes ?? 0, wallet.lowBalanceAlertKes ?? 0, wallet.overdraftAllowed ? 1 : 0, wallet.updatedAt, JSON.stringify(wallet),
+    );
+  }
+  for (const record of data.walletTransactions) {
+    database.prepare(`INSERT INTO wallet_transactions (id,wallet_id,user_id,at,direction,kind,amount,balance_after,channel,status,reference,doc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      record.id, record.walletId, record.userId, record.at, record.direction, record.kind, record.amount, record.balanceAfter, record.channel, record.status, record.reference, JSON.stringify(record),
+    );
+  }
+  for (const record of data.payments) {
+    database.prepare(`INSERT INTO payments (id,user_id,at,channel,method,amount,currency,status,reference,gateway,gateway_ref,fee_kes,net_kes,wallet_tx_id,failure_reason,refunded_at,refunded_by,ip,doc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      record.id, record.userId, record.at, record.channel, record.method, record.amount, record.currency ?? 'KES', record.status, record.reference, record.gateway,
+      record.gatewayRef ?? null, record.feeKes ?? 0, record.netKes ?? 0, record.walletTransactionId ?? null, record.failureReason ?? null, record.refundedAt ?? null, record.refundedBy ?? null, record.ip ?? '', JSON.stringify(record),
+    );
+  }
+  for (const record of data.paymentMethods) {
+    database.prepare('INSERT INTO payment_methods (id,user_id,doc) VALUES (?,?,?)').run(record.id, record.userId ?? '', JSON.stringify(record));
+  }
+  for (const record of data.providers) {
+    const provider = mergePreservedSecrets(existingProviders.get(record.id), record);
+    database.prepare(`INSERT INTO providers (id,name,code,category,enabled,environment,status,latency_ms,cost_per_call,updated_at,doc) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+      record.id, record.name, record.code, record.category ?? '', record.enabled ? 1 : 0, record.environment ?? 'sandbox', record.status ?? 'Active', record.latencyMs ?? 0, record.costPerCallKes ?? 0, record.updatedAt ?? new Date().toISOString(), JSON.stringify(provider),
+    );
+  }
+  for (const record of data.providerLogs) {
+    database.prepare('INSERT INTO provider_logs (id,provider_id,at,status,latency_ms,doc) VALUES (?,?,?,?,?,?)').run(record.id, record.providerId, record.at, record.status, record.latencyMs ?? 0, JSON.stringify(record));
+  }
+  for (const record of data.apiKeys) {
+    const existingHash = existingApiKeyHashes.get(record.id) ?? null;
+    const secretHash = existingHash;
+    const status = secretHash ? (record.status ?? 'active') : 'revoked';
+    const revokedAt = status === 'revoked' ? (record.revokedAt ?? new Date().toISOString()) : null;
+    const apiKey = { ...record, secretHash, status, revokedAt };
+    database.prepare(`INSERT INTO api_keys (id,label,prefix,secret_hash,scopes,provider_id,owner_id,status,environment,last_used_at,revoked_at,doc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      record.id, record.label, record.prefix, secretHash, JSON.stringify(record.scopes ?? []), record.providerId ?? null, record.ownerId, status, record.environment ?? 'sandbox', record.lastUsedAt ?? null, revokedAt, JSON.stringify(apiKey),
+    );
+  }
+  for (const record of data.audit) {
+    database.prepare(`INSERT INTO audit (id,at,actor_id,actor_name,actor_tier,action,entity,entity_id,severity,ip,detail,doc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      record.id, record.at, record.actorId, record.actorName, record.actorTier, record.action, record.entity, record.entityId ?? null, record.severity ?? 'info', record.ip ?? '', record.detail ?? null, JSON.stringify(record),
+    );
+  }
+  for (const record of data.usage) {
+    database.prepare('INSERT INTO usage (id,at,user_id,provider_id,check_type,cost_kes,status,latency_ms,doc) VALUES (?,?,?,?,?,?,?,?,?)').run(
+      record.id, record.at, record.userId, record.providerId, record.checkType ?? '', record.costKes ?? 0, record.status, record.latencyMs ?? 0, JSON.stringify(record),
+    );
+  }
+  for (const record of data.cases) {
+    database.prepare('INSERT INTO cases (id,case_id,subject,status,priority,owner_id,created_at,doc) VALUES (?,?,?,?,?,?,?,?)').run(
+      record.id, record.caseId, record.subject, record.status, record.priority, record.ownerId ?? null, record.createdAt ?? '', JSON.stringify(record),
+    );
+  }
+  for (const record of data.invoices) {
+    database.prepare('INSERT INTO invoices (id,invoice_no,user_id,date,amount_value,status,doc) VALUES (?,?,?,?,?,?,?)').run(record.id, record.invoiceNo, record.userId ?? null, record.date ?? '', record.amountValue ?? 0, record.status, JSON.stringify(record));
+  }
+  for (const record of data.notifications) {
+    database.prepare('INSERT INTO notifications (id,user_id,category,type,read,doc) VALUES (?,?,?,?,?,?)').run(record.id, record.userId ?? null, record.category ?? null, record.type ?? null, record.read ? 1 : 0, JSON.stringify(record));
+  }
+  for (const record of data.activities) {
+    database.prepare('INSERT INTO activities (id,at,doc) VALUES (?,?,?)').run(record.id, record.at ?? null, JSON.stringify(record));
+  }
+  restoreKv(database, 'settings', data.settings, true);
+  restoreKv(database, 'pricing', data.pricing, true);
+}
+
+export function restoreBackup(payload, database = db) {
+  const data = validateBackup(payload);
+  const existingPasswords = new Map(database.prepare('SELECT id,password FROM users').all().map((row) => [row.id, row.password]));
+  const existingApiKeyHashes = new Map(database.prepare('SELECT id,secret_hash FROM api_keys').all().map((row) => [row.id, row.secret_hash]));
+  const existingProviders = new Map(database.prepare('SELECT id,doc FROM providers').all().map((row) => [row.id, JSON.parse(row.doc)]));
+  database.exec('BEGIN');
+  try {
+    database.exec('DELETE FROM wallet_transactions; DELETE FROM payments; DELETE FROM payment_methods; DELETE FROM provider_logs; DELETE FROM providers; DELETE FROM api_keys; DELETE FROM audit; DELETE FROM usage; DELETE FROM cases; DELETE FROM invoices; DELETE FROM notifications; DELETE FROM activities; DELETE FROM wallets; DELETE FROM users;');
+    restoreRows(database, data, existingPasswords, existingApiKeyHashes, existingProviders);
+    database.exec('COMMIT');
+  } catch (error) {
+    database.exec('ROLLBACK');
+    throw error;
+  }
+  return { format: 'iprs-backup', version: 1, restored: true };
+}
 
 /* ------------------------------ STK pending ------------------------------- */
 

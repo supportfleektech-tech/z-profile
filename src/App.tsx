@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { RouterProvider, useAppRouter } from './context/RouterContext';
 import { AppDataProvider, useAppData } from './context/AppDataContext';
 import { Header } from './components/common/Header';
 import { PageRouter } from './components/navigation/PageRouter';
-import { SearchSimulationModal } from './components/interactive/SearchSimulationModal';
+import { canCloseSearch, SearchSimulationModal } from './components/interactive/SearchSimulationModal';
 import { ToastContainer } from './components/common/ToastContainer';
 import { CommandPalette } from './components/common/CommandPalette';
 import { AppShell } from './components/layout/AppShell';
 import { PrintReport } from './components/report/PrintReport';
+import { DemoBanner } from './components/common/DemoBanner';
 
 function AppInner() {
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
@@ -15,6 +16,15 @@ function AppInner() {
   const { navigate, currentPage, currentPath } = useAppRouter();
   const { isAuthenticated, can, activeDossier, settings } = useAppData();
   const [authChecked, setAuthChecked] = useState(false);
+  const searchScanningRef = useRef(false);
+
+  const closeSearch = useCallback(() => {
+    if (canCloseSearch(searchScanningRef.current)) setIsSearchModalOpen(false);
+  }, []);
+
+  const handleSearchScanningChange = useCallback((scanning: boolean) => {
+    searchScanningRef.current = scanning;
+  }, []);
 
   useEffect(() => {
     document.title = `${currentPage.shortTitle} · IPRS Kenya`;
@@ -36,12 +46,12 @@ function AppInner() {
       }
       if (e.key === 'Escape') {
         setIsCommandOpen(false);
-        setIsSearchModalOpen(false);
+        closeSearch();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [can]);
+  }, [can, closeSearch]);
 
   useEffect(() => {
     if (authChecked) {
@@ -53,31 +63,40 @@ function AppInner() {
   }, [isAuthenticated, currentPath, navigate, authChecked]);
 
   const handleVerificationComplete = useCallback(() => {
-    setIsSearchModalOpen(false);
+    closeSearch();
     navigate('/identity-profile');
-  }, [navigate]);
+  }, [closeSearch, navigate]);
 
   const onLogin = currentPath === '/login' || !isAuthenticated;
 
   return (
     <div className="min-h-screen min-h-[100dvh] bg-[#050b14] text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-black">
+      <a href="#main-content" className="sr-only absolute left-3 top-3 z-[200] rounded-md bg-cyan-500 px-3 py-2 text-xs font-bold text-black focus:not-sr-only">
+        Skip to content
+      </a>
+      <DemoBanner />
       {!onLogin && (
         <Header onOpenLiveSearch={() => setIsSearchModalOpen(true)} onOpenCommandPalette={() => setIsCommandOpen(true)} />
       )}
 
       {onLogin ? (
-        <main className="flex-1 flex flex-col min-h-0 overflow-y-auto animate-page-enter">
+        <main id="main-content" className="flex-1 flex flex-col min-h-0 overflow-y-auto animate-page-enter">
           <PageRouter />
         </main>
       ) : (
         <AppShell onOpenCommandPalette={() => setIsCommandOpen(true)}>
-          <main className="flex-1 flex flex-col min-h-0 overflow-y-auto animate-page-enter">
+          <main id="main-content" className="flex-1 flex flex-col min-h-0 overflow-y-auto animate-page-enter">
             <PageRouter />
           </main>
         </AppShell>
       )}
 
-      <SearchSimulationModal isOpen={isSearchModalOpen} onClose={() => setIsSearchModalOpen(false)} onViewProfile={handleVerificationComplete} />
+      <SearchSimulationModal
+        isOpen={isSearchModalOpen}
+        onClose={closeSearch}
+        onViewProfile={handleVerificationComplete}
+        onScanningChange={handleSearchScanningChange}
+      />
       <CommandPalette
         isOpen={isCommandOpen}
         onClose={() => setIsCommandOpen(false)}

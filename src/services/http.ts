@@ -27,6 +27,10 @@ export function onApiModeChange(fn: (m: ApiMode) => void): () => void {
   return () => listeners.delete(fn);
 }
 
+export function fallbackToLocal() {
+  setMode('local');
+}
+
 function setMode(next: ApiMode): void {
   if (mode === next) return;
   mode = next;
@@ -140,7 +144,7 @@ export async function apiOr<T>(
   path: string,
   init: { method?: string; body?: unknown } | undefined,
   localFallback: () => Promise<T> | T,
-  opts?: { syncLocal?: boolean }
+  opts?: { syncLocal?: boolean; fallbackOnClientError?: boolean }
 ): Promise<{ data: T; via: ApiMode }> {
   if (mode === 'api') {
     try {
@@ -156,16 +160,34 @@ export async function apiOr<T>(
       return { data, via: 'api' };
     } catch (err) {
       const status = err instanceof ApiError ? err.status : undefined;
-      // 401 means the session is dead (no/expired/revoked token) — the API can't serve
-      // this user anymore, so continue gracefully on the local adapter (chip → LOCAL).
-      // 4xx otherwise are business answers served locally WITHOUT downgrading.
-      if (status === 401) setMode('local');
-      const business = typeof status === 'number' && status >= 400 && status < 500 && status !== 401;
-      if (!business) setMode('local');
+      const clientError = typeof status === 'number' && status >= 400 && status < 500;
+      if (clientError && (status === 401 || opts?.fallbackOnClientError === false)) {
+        return { data: (err instanceof ApiError ? err.payload : null) as T, via: 'api' };
+      }
+      if (clientError) return { data: await localFallback(), via: 'local' };
+      setMode('local');
     }
   }
   const data = await localFallback();
   return { data, via: 'local' };
+}
+
+export async function apiFirst<T>(path: string, init: { method?: string; body?: unknown }, localFallback: () => Promise<T> | T): Promise<T> {
+  if (mode === 'api') {
+    try {
+      return await request<T>(init.method ?? 'GET', path, init.body);
+    } catch (err) {
+      if (err instanceof ApiError && typeof err.status === 'number' && err.status < 500) throw err;
+      setMode('local');
+    }
+  }
+  return localFallback();
+}
+
+export function backendOrigin(): string {
+  const configured = import.meta.env.VITE_BACKEND_ORIGIN?.replace(/\/$/, '');
+  if (configured) return configured;
+  return typeof window === 'undefined' ? '' : window.location.origin;
 }
 
 export const api = {

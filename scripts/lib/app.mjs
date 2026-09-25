@@ -39,7 +39,7 @@ function loadBuild() {
 }
 
 /** Boot one isolated instance of the app. Each call is a completely fresh session. */
-export function bootApp({ storage } = {}) {
+export function bootApp({ storage, fetchImpl } = {}) {
   const errors = [];
   const vc = new VirtualConsole();
   vc.on('jsdomError', (e) => { if (!NOISE.test(e.message)) errors.push(`jsdomError: ${e.message}`); });
@@ -66,15 +66,16 @@ export function bootApp({ storage } = {}) {
   window.Element.prototype.scrollTo = function () {};
   Object.defineProperty(window.navigator, 'clipboard', { value: { writeText: async () => {}, readText: async () => '' }, configurable: true });
 
-  // Deterministic LOCAL adapter (no backend is reachable from jsdom).
-  window.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  window.fetch = fetchImpl ?? (async () => { throw new TypeError('Failed to fetch'); });
 
   // Capture blob downloads to prove exports produce real files.
   const downloads = [];
   window.URL.createObjectURL = (blob) => {
-    const rec = { size: blob?.size ?? 0, type: blob?.type ?? '', head: null, path: null };
+    const rec = { size: blob?.size ?? 0, type: blob?.type ?? '', head: null, text: null, path: null };
     downloads.push(rec);
     if (blob?.slice) blob.slice(0, 8).text?.().then((t) => { rec.head = t; }).catch(() => {});
+    if (blob?.text) blob.text().then((value) => { rec.text = value; }).catch(() => {});
+    else if (blob?.arrayBuffer) blob.arrayBuffer().then((buffer) => { rec.text = new TextDecoder().decode(buffer); }).catch(() => {});
     if (process.env.SMOKE_DUMP_DIR && blob?.arrayBuffer) {
       blob.arrayBuffer().then((buf) => {
         mkdirSync(process.env.SMOKE_DUMP_DIR, { recursive: true });
@@ -244,9 +245,11 @@ export async function loginAs(app, email, password = DEMO_PASSWORD) {
 
 export const results = [];
 export function check(name, cond, detail = '') {
-  results.push({ name, ok: !!cond });
-  console.log(`${cond ? 'PASS' : 'FAIL'} ${name}${detail ? ' — ' + detail : ''}`);
-  return !!cond;
+  const ok = !!cond;
+  results.push({ name, ok });
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ' — ' + detail : ''}`);
+  if (!ok) throw new Error(`Smoke assertion failed: ${name}`);
+  return true;
 }
 
 export function summarise(title) {

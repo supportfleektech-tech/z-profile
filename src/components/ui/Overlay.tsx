@@ -12,13 +12,16 @@ import { cn } from '../../utils/cn';
 
 function useOverlay(open: boolean, onClose: () => void) {
   const ref = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
       }
       if (e.key === 'Tab' && ref.current) {
         const focusables = ref.current.querySelectorAll<HTMLElement>(
@@ -39,7 +42,6 @@ function useOverlay(open: boolean, onClose: () => void) {
     document.addEventListener('keydown', onKey, true);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    // Move focus into the overlay.
     const t = setTimeout(() => {
       const target = ref.current?.querySelector<HTMLElement>('[data-autofocus]') ?? ref.current?.querySelector<HTMLElement>('button,input,select,textarea');
       target?.focus();
@@ -48,8 +50,9 @@ function useOverlay(open: boolean, onClose: () => void) {
       document.removeEventListener('keydown', onKey, true);
       document.body.style.overflow = prevOverflow;
       clearTimeout(t);
+      if (trigger?.isConnected) trigger.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   return ref;
 }

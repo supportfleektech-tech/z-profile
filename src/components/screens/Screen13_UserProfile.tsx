@@ -56,7 +56,7 @@ const ACCENTS: { id: 'cyan' | 'emerald' | 'violet' | 'amber' | 'rose'; label: st
 export const Screen13_UserProfile: React.FC = () => {
   const {
     currentUser, pushToast, logout, settings, notificationPrefs, setNotificationPrefs, appearance,
-    setAppearance, sessions, revokeSession, apiKeys, createApiKey, revokeApiKey, wallet, quota,
+    setAppearance, sessions, revokeSession, revokeOtherSessions, apiKeys, createApiKey, revokeApiKey, wallet, quota,
   } = useAppData();
   const { navigate } = useAppRouter();
   const [tab, setTab] = useState<Tab>('Profile');
@@ -167,12 +167,12 @@ export const Screen13_UserProfile: React.FC = () => {
       header: '',
       align: 'right',
       render: (s) => (
-        <Button size="xs" variant="danger" disabled={s.current} onClick={() => revokeSession(s.id)} icon={<Lock size={11} />}>
+        <Button size="xs" variant="danger" data-session-id={s.id} disabled={s.current} onClick={() => revokeSession(s.id)} icon={<Lock size={11} />}>
           <span className="hidden sm:inline">Revoke</span>
         </Button>
       ),
       renderMobile: (s) => (
-        <Button size="xs" variant="danger" disabled={s.current} onClick={() => revokeSession(s.id)} icon={<Lock size={11} />}>
+        <Button size="xs" variant="danger" data-session-id={s.id} disabled={s.current} onClick={() => revokeSession(s.id)} icon={<Lock size={11} />}>
           Revoke this session
         </Button>
       ),
@@ -397,7 +397,12 @@ export const Screen13_UserProfile: React.FC = () => {
               </div>
             </div>
 
-            <Panel title="Your sessions" subtitle={`${mySessions.length} active · platform limit ${settings.security.maxConcurrentSessions} · idle timeout ${settings.security.idleTimeoutMin} min`} icon={<MonitorSmartphone size={14} className="text-cyan-400" />}>
+            <Panel
+              title="Your sessions"
+              subtitle={`${mySessions.length} active · platform limit ${settings.security.maxConcurrentSessions} · idle timeout ${settings.security.idleTimeoutMin} min`}
+              icon={<MonitorSmartphone size={14} className="text-cyan-400" />}
+              actions={<Button size="xs" variant="secondary" icon={<LogOut size={11} />} disabled={mySessions.length <= 1} onClick={() => void revokeOtherSessions()}>Revoke other sessions</Button>}
+            >
               <ResponsiveTable columns={sessionCols} rows={mySessions} rowKey={(s) => s.id} dense emptyTitle="No active sessions" />
             </Panel>
           </>

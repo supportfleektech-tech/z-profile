@@ -10,7 +10,10 @@ interface SearchSimulationModalProps {
   onClose: () => void;
   onViewProfile?: () => void;
   initialQuery?: string;
+  onScanningChange?: (scanning: boolean) => void;
 }
+
+export const canCloseSearch = (scanning: boolean): boolean => !scanning;
 
 const DEMO_SUBJECTS = [
   { name: 'John Mwangi Kamau', id: '23456789', phone: '0712345678' },
@@ -26,7 +29,7 @@ const QUICK_CHECKS = ['kyc-id', 'kyc-kra', 'kyc-mpesa', 'kyc-crb', 'kyc-address'
  * It is not a fake animation any more — it runs the same priced, consented pipeline as
  * the New Search screen and writes the resulting dossier, ledger entry and audit record.
  */
-export const SearchSimulationModal: React.FC<SearchSimulationModalProps> = ({ isOpen, onClose, onViewProfile }) => {
+export const SearchSimulationModal: React.FC<SearchSimulationModalProps> = ({ isOpen, onClose, onViewProfile, onScanningChange }) => {
   const { runSearch, priceSearch, preflightSearch, wallet, pricing, pushToast } = useAppData();
   const [subject, setSubject] = useState(DEMO_SUBJECTS[0]);
   const [checks, setChecks] = useState<string[]>(QUICK_CHECKS);
@@ -51,6 +54,14 @@ export const SearchSimulationModal: React.FC<SearchSimulationModalProps> = ({ is
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    onScanningChange?.(stage === 'scanning');
+  }, [onScanningChange, stage]);
+
+  const close = () => {
+    if (canCloseSearch(stage === 'scanning')) onClose();
+  };
+
   const cost = priceSearch(checks);
   const preflight = preflightSearch(checks);
 
@@ -58,6 +69,7 @@ export const SearchSimulationModal: React.FC<SearchSimulationModalProps> = ({ is
 
   const run = async () => {
     if (checks.length === 0) return;
+    onScanningChange?.(true);
     setStage('scanning');
     setStepIndex(0);
 
@@ -76,7 +88,7 @@ export const SearchSimulationModal: React.FC<SearchSimulationModalProps> = ({ is
 
     if (res.ok) {
       setStage('done');
-      setMessage(`${res.dossier?.subject.fullName} · risk ${res.dossier?.risk.score}/100 · ${KES(res.costKes ?? 0, { decimals: false })} debited`);
+      setMessage(`${res.dossier?.subject.fullName} · risk ${res.dossier?.risk.score === null || res.dossier?.risk.score === undefined ? 'unavailable' : `${res.dossier.risk.score}/100`} · ${KES(res.costKes ?? 0, { decimals: false })} debited`);
       pushToast({ title: 'Verification complete', description: message, type: 'success' });
       setTimeout(() => {
         onClose();
@@ -98,7 +110,7 @@ export const SearchSimulationModal: React.FC<SearchSimulationModalProps> = ({ is
   return (
     <Modal
       open={isOpen}
-      onClose={stage === 'scanning' ? () => undefined : onClose}
+      onClose={close}
       title={
         <span className="flex items-center gap-2">
           <Sparkles size={15} className="text-cyan-400" /> Live citizen verification
@@ -115,7 +127,7 @@ export const SearchSimulationModal: React.FC<SearchSimulationModalProps> = ({ is
               <strong className="text-emerald-300 font-mono">{KES(cost, { decimals: false })}</strong>
             </span>
             <div className="flex gap-2">
-              <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+              <Button variant="ghost" size="sm" onClick={close}>Cancel</Button>
               <Button variant="primary" size="sm" onClick={run} disabled={!preflight.ok || checks.length === 0} icon={<ShieldCheck size={13} />}>
                 Run verification
               </Button>
@@ -123,7 +135,7 @@ export const SearchSimulationModal: React.FC<SearchSimulationModalProps> = ({ is
           </div>
         ) : (
           <div className="w-full flex justify-end">
-            <Button variant="secondary" size="sm" onClick={onClose} disabled={stage === 'scanning'}>
+            <Button variant="secondary" size="sm" onClick={close} disabled={stage === 'scanning'}>
               {stage === 'scanning' ? 'Running…' : 'Close'}
             </Button>
           </div>

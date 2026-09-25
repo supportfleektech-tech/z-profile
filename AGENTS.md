@@ -13,12 +13,12 @@ seriously.
 
 ```bash
 npm run dev:all      # Express :8787 + Vite :5173 (Vite proxies /api → :8787)
-npm run verify       # typecheck + build + API(77) + DOM(44) + flows(63) + traceability(85)
+npm run verify       # typecheck + lint + unit(85) + build + API(114) + DOM(44) + flows(64) + traceability(96)
 npm run db:reset     # wipe the backend SQLite (reseeds on next start)
 ```
 
-- `npm run verify` is **the** definition of done: 270 assertions (API 77 · DOM 44 ·
-  flows 64 · trace 85). Never claim work is finished without it green.
+- `npm run verify` is **the** definition of done: 85 unit tests and 318 smoke assertions
+  (API 114 · DOM 44 · flows 64 · trace 96). Never claim work is finished without it green.
 - `scripts/smoke-{api,dom,flows,requirements}.mjs` run against the **built bundle** or a
   live child server — they need `npm run build` first (verify handles the ordering).
 - `node_modules` and `dist` can be wiped between sessions; `npm install && npm run build`
@@ -35,16 +35,16 @@ npm run db:reset     # wipe the backend SQLite (reseeds on next start)
   in the UI (`canCreateTier`), the services **and** `POST /api/users`.
 - **State** — `AppDataContext` over `src/services/db.ts` (localStorage). Persisted key
   is **`iprs.v1.workspace`** (`NS='iprs.v1'` + `'workspace'`), value = the raw state
-  object (not a wrapper). `src/services/http.ts` `apiOr()` treats 4xx as a business
-  answer (served locally, session stays `API`) and flips to the `LOCAL` adapter only on
-  network errors / 5xx; mutations dual-write so both stores stay coherent.
+  object (not a wrapper). `src/services/http.ts` `apiOr()` serves non-401 4xx business
+  answers locally while the session stays `API`, returns 401 directly without downgrade,
+  and flips to `LOCAL` only on network errors / 5xx; mutations dual-write so both stores
+  stay coherent.
 - **Routing** — hash-based; `platformRoutes` in `src/types/routes.ts` drives sidebar
   visibility, router guards and access-denied, from `tiers` + `permission` alone.
 - **Pricing** — `src/data/pricing.ts` is the ONLY place rates live (UI, wallet debits,
-  PDF schedule, backend seed all read it). Provenance is per item:
-  `confirmedFromProposal` (15 of 25 confirmed; vehicle arrived truncated, extract has
-  no criminal/deceased/KYB products → those 10 stay flagged, catalogue-level flag stays
-  `false` until all are confirmed). `pricingProvenance()` feeds every banner.
+  PDF schedule, backend seed all read it). The catalogue is fully priced: 34/34 items are
+  confirmed, with 28 proposal rates and six explicit platform-priced decisions.
+  `pricingProvenance()` feeds every banner.
 - **Backend** — `server/index.mjs` (Express 5, `node:sqlite`, port 8787) seeds from the
   same `src/data/*.ts` modules the browser mock uses, so the two cannot drift.
 - **Auth** — login issues an HMAC-signed bearer token (`server/auth.mjs`) bound to a live
@@ -55,10 +55,10 @@ npm run db:reset     # wipe the backend SQLite (reseeds on next start)
   boot (`hashStoredPasswords()`, idempotent), creation/resets hash on arrival, and
   `publicUser` strips both plaintext and hash from every response. The frontend gets
   the token from `authService.login`, stores it in workspace state (`authToken`), and
-  `http.ts` sends `Authorization: Bearer`; a 401 downgrades the session to LOCAL.
+  `http.ts` sends `Authorization: Bearer`; a backend 401 remains an API error and never downgrades to LOCAL.
   In LOCAL mode there is no token and no network calls.
 - **Spin Mobile (searches)** — `src/data/spinModules.ts` is the transcribed Kenya module
-  registry (21 modules, `search_type`, endpoints, params, response shapes) that the UI,
+  registry (24 modules, `search_type`, endpoints, params, response shapes) that the UI,
   `GET /api/spin/modules` and `server/spin.mjs` all read; review in
   `docs/SPIN_INTEGRATION.md`. Same pattern as pricing: one file, many consumers.
 - **M-PESA gateway** — `server/daraja.mjs` swaps the STK simulation for the real Daraja
@@ -71,16 +71,17 @@ npm run db:reset     # wipe the backend SQLite (reseeds on next start)
 - jsdom cannot execute `<script type="module">` → strip the tag, then `window.eval(bundle)`.
   `scripts/lib/app.mjs` does all of this; use it, don't hand-roll a new boot.
 - Polyfills live in `bootApp()`: `matchMedia`, `ResizeObserver`, `scroll*`,
-  `scrollIntoView`, clipboard; `window.fetch` is forced to throw so the LOCAL adapter is
-  deterministic. `bootApp({ storage })` pre-seeds localStorage BEFORE boot for
-  reload-persistence tests.
+  `scrollIntoView`, clipboard. `bootApp()` defaults `window.fetch` to a deterministic
+  network failure for LOCAL tests; server-backed flows pass `fetchImpl`.
+  `bootApp({ storage })` pre-seeds localStorage BEFORE boot for reload-persistence tests.
 - **Scope DOM queries**: unscoped `findButton('top up')` matches the header wallet chip;
   modal lookups must go through `within(dialog())`; tabs by `findTab()`/`aria-selected`;
   `SegmentedControl` uses `aria-pressed` (not `role="tab"`).
 - The search flow persists history in ONE atomic step-5 setState; the wallet reserve
   (step 3) flips earlier. Wait on `searchHistory.length`, never on balance.
-- Stale process on the API test port? `smoke-api.mjs` self-guards (checks the health
-  payload's DB path) — kill the squatter, don't bump the port.
+- Smoke child servers use `process.execPath` and wait for a healthy response before tests;
+  they terminate and remove temporary SQLite files in `finally`. Do not replace that with a
+  shell-dependent `node` command.
 
 ## Critical gotchas (still true)
 
@@ -96,7 +97,7 @@ npm run db:reset     # wipe the backend SQLite (reseeds on next start)
 ## Type System
 
 - `tsconfig.json`: `strict`, `noUnusedLocals`, `noUnusedParameters`,
-  `noFallthroughCasesInSwitch` — all must pass. TS compiler is the gatekeeper (no ESLint).
+  `noFallthroughCasesInSwitch` — all must pass. TypeScript and ESLint are both gates.
 - `@/*` path alias → `src/*`.
 
 ## File Organization

@@ -1,9 +1,14 @@
-import type { AuditEntry, RoleTier, SystemUser } from '../types';
+import type { AuditEntry, RoleTier, SessionRecord, SystemUser } from '../types';
 import { can, canCreateTier, canManageUser, effectivePermissions, legacyRoleToTier } from '../auth/permissions';
 import { getSnapshot, setState } from './db';
 import { apiOr } from './http';
 import { isValidEmail, sleep, uid } from '../lib/format';
 import { DEMO_PASSWORD } from '../data/users';
+
+const USER_UPDATE_FIELDS = new Set([
+  'name', 'email', 'phone', 'department', 'jobTitle', 'avatarUrl', 'tier', 'subRole', 'status',
+  'mfaEnabled', 'permissionOverrides', 'ipAllowlist', 'password', 'failedLoginAttempts', 'lockedUntil',
+]);
 
 /**
  * Authentication and account administration.
@@ -258,6 +263,8 @@ export const authService = {
       if (!actor) return { ok: false, message: 'Not authenticated.' };
       const target = getSnapshot().users.find((u) => u.id === id);
       if (!target) return { ok: false, message: 'Account not found.' };
+      const unknown = Object.keys(patch).find((field) => !USER_UPDATE_FIELDS.has(field));
+      if (unknown) return { ok: false, message: `Unexpected request field: ${unknown}.` };
       if (!canManageUser(actor, target)) {
         if (target.isSystem) return { ok: false, message: 'The Super Admin account is seeded by the system and is immutable.' };
         return { ok: false, message: 'You cannot modify this account.' };
@@ -411,7 +418,18 @@ export const authService = {
     return { ok: true };
   },
 
+  async listSessions(actor: SystemUser | null): Promise<SessionRecord[]> {
+    const local = async () => (actor ? getSnapshot().sessions.filter((session) => session.userId === actor.id) : []);
+    const result = await apiOr<{ ok: boolean; sessions: SessionRecord[] } | SessionRecord[]>('/api/auth/sessions', { method: 'GET' }, local);
+    const remote = Array.isArray(result.data) ? result.data : result.data.sessions;
+    if (result.via === 'api') setState((prev) => ({ ...prev, sessions: [...prev.sessions.filter((session) => session.userId !== actor?.id), ...remote] }));
+    return remote;
+  },
+
   async revokeSession(actor: SystemUser | null, sessionId: string): Promise<{ ok: boolean; message?: string }> {
+    const session = getSnapshot().sessions.find((x) => x.id === sessionId);
+    const privileged = !!actor && can(actor, 'sessions.revoke') && session?.userId !== actor.id;
+    const path = privileged ? `/api/sessions/${sessionId}` : `/api/auth/sessions/${sessionId}`;
     const local = async () => {
       const s = getSnapshot();
       const session = s.sessions.find((x) => x.id === sessionId);
@@ -435,7 +453,18 @@ export const authService = {
       });
       return { ok: true };
     };
-    return apiOr(`/api/sessions/${sessionId}`, { method: 'DELETE' }, local, { syncLocal: true }).then((r) => r.data);
+    return apiOr(path, { method: 'DELETE' }, local, { syncLocal: true, fallbackOnClientError: false }).then((r) => r.data);
+  },
+
+  async revokeOtherSessions(actor: SystemUser | null): Promise<{ ok: boolean; message?: string; revoked?: number }> {
+    const local = async () => {
+      if (!actor) return { ok: false, message: 'Not authenticated.' };
+      const current = getSnapshot().sessions.find((session) => session.userId === actor.id && session.current);
+      const revoked = getSnapshot().sessions.filter((session) => session.userId === actor.id && session.id !== current?.id);
+      setState((prev) => ({ sessions: prev.sessions.filter((session) => !revoked.some((row) => row.id === session.id)) }));
+      return { ok: true, revoked: revoked.length };
+    };
+    return apiOr('/api/auth/sessions/revoke-others', { method: 'POST' }, local, { syncLocal: true }).then((r) => r.data);
   },
 
   permissionsFor(user: SystemUser): ReturnType<typeof effectivePermissions> {

@@ -30,8 +30,10 @@ jobs:
           node-version: 22
           cache: npm
 
-      - run: npm ci
-      - run: npm run build
+      - name: Install and build single-file Pages bundle
+        run: npm ci && npm run build
+        env:
+          VITE_DEMO_BANNER: Demo environment — data is simulated
 
       - uses: actions/configure-pages@v5
 

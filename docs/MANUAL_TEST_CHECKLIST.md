@@ -1,6 +1,6 @@
 # Manual QA Checklist — Z-Profile IPRS demo
 
-jsdom drives every automated gate (231 assertions across `npm run verify`), but jsdom performs **no layout**. These clicks have never been *seen*. Work top-to-bottom at each width: **360**, **768**, **1280**, **1920**. Log anything that overflows, clips, traps scroll, or mis-stacks.
+jsdom drives every automated gate (85 unit tests and 318 smoke assertions across `npm run verify`), but jsdom performs **no layout**. These clicks have never been *seen*. Work top-to-bottom at each width: **360**, **768**, **1280**, **1920**. Log anything that overflows, clips, traps scroll, or mis-stacks.
 
 **Sign in:** password `Iprs@2026!` for every account.
 
@@ -36,6 +36,8 @@ Still as Sarah → open the dossier report.
 - [ ] **Print** (Ctrl-P preview): print stylesheet renders the FULL data, no nav/chrome, readable margins.
 - [ ] **Summary PDF** downloads (~14 KB); **Download PDF** downloads a much larger file (~340 KB). Open both — the full one carries every section.
 - [ ] Masked/unmasked (eye) toggle visibly masks PII on screen **and** in the downloaded PDF.
+- [ ] Partial provider responses show `Unknown`, `Unavailable`, or `Not provided`; never
+  `null`, `null%`, `0%`, `KES 0`, or a fabricated `Medium risk` conclusion.
 
 ## 4 · Profile settings — Security & Notifications (was: identical tabs)
 As Sarah → **Profile**.
@@ -64,7 +66,31 @@ Sign in as David (Admin) → **Providers**.
 - [ ] Bundle “KYC Standard” = **KES 250** (exact sum of its items).
 - [ ] As Super Admin → Pricing & Tiers: inline rate edit + save works, the change is audit-logged with old → new, and provenance never flips.
 
-## 8 · Tiers & access (3 tiers, distinct dashboards)
+## 8 · Machine API and trust boundaries
+
+With `npm run dev:all` running:
+
+- [ ] As John, open **API documentation → Keys**, issue a sandbox key with only the
+  scopes the integration uses. The secret is shown once; after dismissal, reload does not
+  reveal it or its hash.
+- [ ] `GET /api/v1/pricing` without a key returns `401`; a pricing-only key cannot read
+  `/api/v1/wallet` (`403`); a verification request with `consent: "true"` returns `400`.
+- [ ] A correctly scoped key debits exactly the catalogue rate, writes usage/audit, and
+  returns the owner wallet only. An insufficient wallet returns `402` with `requiredKes`.
+- [ ] Trigger the API limiter and confirm `RateLimit-Limit`, `RateLimit-Remaining`,
+  `RateLimit-Reset`, and `Retry-After` headers; the rejected body is the documented `429`.
+- [ ] Submit the M-PESA callback once with the wrong token (`401`), then with the right
+  token and a mismatched amount (`400` plus a critical audit event). Only the matching
+  token/amount can settle.
+- [ ] As John, open **System settings → Backup & Recovery**, download the versioned JSON,
+  confirm sessions and in-flight STK intents are absent, then restore it and confirm the
+  current auth/callback secrets and session remain usable.
+- [ ] As any signed-in user, open **Profile → Security**, revoke another session or use
+  **Revoke other sessions**; the revoked bearer token immediately returns `401`.
+- [ ] Confirm the server database reports `PRAGMA user_version = 1` after first boot and
+  remains forward-only; no reset or destructive migration is required.
+
+## 9 · Tiers & access (3 tiers, distinct dashboards)
 - [ ] Sign in as each persona — each lands on its **own** dashboard (User wallet/quota · Admin org KPIs · Super Admin revenue/permissions/audit).
 - [ ] Sarah: **Admin console** and **Payments Monitor** are access-denied; no such nav links.
 - [ ] David: Payments Monitor opens; platform settings group is **read-only** (Save disabled).
@@ -72,6 +98,6 @@ Sign in as David (Admin) → **Providers**.
 - [ ] David → Create account: Admin tier **disabled**; submission refused.
 - [ ] Nobody can create a Super Admin from the UI anywhere.
 
-## 9 · System settings
-- [ ] As John: all nine groups editable; configuration-health panel lists the pricing check as “15 of 25 confirmed”; maintenance toggle gated to Super Admin.
+## 10 · System settings
+- [ ] As John: all nine groups editable; configuration-health panel reports the fully priced catalogue; maintenance toggle gated to Super Admin.
 - [ ] Flip maintenance on: New Search shows the maintenance banner; flip back.

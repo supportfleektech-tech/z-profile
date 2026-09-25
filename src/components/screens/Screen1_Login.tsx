@@ -145,7 +145,7 @@ export const Screen1_Login: React.FC<Screen1LoginProps> = ({ onLoginSuccess }) =
       </aside>
 
       {/* Form panel */}
-      <main className="flex-1 flex flex-col items-center justify-center px-4 sm:px-8 py-8 w-full min-w-0">
+      <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-8 py-8 w-full min-w-0">
         <div className="w-full max-w-[440px]">
           <div className="lg:hidden mb-6 flex justify-center">
             <IprsLogo size="md" showSubtitle={false} />
@@ -314,7 +314,7 @@ export const Screen1_Login: React.FC<Screen1LoginProps> = ({ onLoginSuccess }) =
             the interface.
           </p>
         </div>
-      </main>
+      </div>
     </div>
   );
 };

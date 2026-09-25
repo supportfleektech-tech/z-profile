@@ -2,6 +2,7 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import type { Dossier, SystemSettings } from '../../types';
 import { formatDate, KES, maskPii } from '../../lib/format';
+import { hasReportSection, reportAmount, reportBoolean, reportConfidence, reportCount, reportDate, reportLatency, reportPercent, reportScore, reportStatus, riskScoreAvailable } from '../../lib/report-values';
 
 /**
  * Print-only rendering of the COMPLETE extracted dataset.
@@ -13,7 +14,7 @@ import { formatDate, KES, maskPii } from '../../lib/format';
  */
 
 const fmt = (v: string | number | boolean | null | undefined): string =>
-  v === null || v === undefined || v === '' ? '—' : typeof v === 'boolean' ? (v ? 'Yes' : 'No') : String(v);
+  v === null || v === undefined || v === '' ? 'Not provided' : typeof v === 'boolean' ? (v ? 'Yes' : 'No') : String(v);
 
 const Row: React.FC<{ label: string; value: React.ReactNode; mono?: boolean }> = ({ label, value, mono }) => (
   <tr className="pr-row">
@@ -69,6 +70,14 @@ export const PrintReport: React.FC<{ dossier: Dossier; settings: SystemSettings;
 
   const s = dossier.subject;
   const m = (v: string, mode: 'full' | 'partial' = 'partial') => (mask ? maskPii(v, mode) : v);
+  const taxAvailable = hasReportSection(dossier, ['kra']);
+  const mpesaAvailable = hasReportSection(dossier, ['mpesa']);
+  const creditAvailable = hasReportSection(dossier, ['crb', 'credit']);
+  const employerAvailable = hasReportSection(dossier, ['employer']);
+  const utilityAvailable = hasReportSection(dossier, ['kplc', 'utility']);
+  const businessAvailable = hasReportSection(dossier, ['business', 'company']);
+  const screeningAvailable = hasReportSection(dossier, ['screening', 'pep', 'sanction', 'criminal']);
+  const riskAvailable = riskScoreAvailable(dossier);
 
   return createPortal(
     <div className="pr-doc" data-report-id={dossier.reportId}>
@@ -93,7 +102,7 @@ export const PrintReport: React.FC<{ dossier: Dossier; settings: SystemSettings;
       <div className="pr-verdict">
         <strong>{dossier.risk.verdict}</strong>
         <span>
-          Composite trust score {dossier.risk.score}/100 ({dossier.risk.band} Risk). {dossier.risk.recommendation} Manual review{' '}
+          Composite trust score {riskAvailable ? `${dossier.risk.score}/100` : 'unavailable'} ({riskAvailable ? `${dossier.risk.band} Risk` : 'risk unknown'}). {dossier.risk.recommendation} Manual review{' '}
           {dossier.risk.reviewRequired ? 'REQUIRED' : 'not required'}.
         </span>
       </div>
@@ -104,6 +113,7 @@ export const PrintReport: React.FC<{ dossier: Dossier; settings: SystemSettings;
           <tbody>
             <Row label="Report ID" value={dossier.reportId} mono />
             <Row label="Dossier ID" value={dossier.id} mono />
+            <Row label="Data mode" value={dossier.dataMode === 'simulated' ? 'SIMULATED VERIFICATION — seeded demo data, not a live registry response' : 'Provider response'} />
             <Row label="Generated" value={formatDate(dossier.generatedAt, true)} />
             <Row label="Prepared by" value={`${dossier.attestation.preparedBy} (${dossier.attestation.preparedByTier.replace('_', ' ')})`} />
             <Row label="Sections" value={`${dossier.sections.length} source sections · ${dossier.sections.reduce((a, x) => a + x.fields.length, 0)} extracted fields`} />
@@ -121,24 +131,24 @@ export const PrintReport: React.FC<{ dossier: Dossier; settings: SystemSettings;
           <tbody>
             <Row label="Full name" value={s.fullName} />
             <Row label="Given / middle / family" value={[s.firstName, s.middleName, s.lastName].filter(Boolean).join(' / ')} />
-            <Row label="Known aliases" value={s.aliases.length ? s.aliases.join('; ') : 'None on record'} />
+            <Row label="Known aliases" value={s.aliases.length ? s.aliases.join('; ') : 'Unavailable'} />
             <Row label="Gender" value={s.gender} />
             <Row label="Date of birth" value={`${s.dob} (${s.dobRaw})`} />
             <Row label="Nationality" value={s.nationality} />
             <Row label="National ID" value={m(s.idNumber)} mono />
             <Row label="ID document type" value={s.idType} />
-            <Row label="Registration serial" value={m(s.registrationSerial ?? '—')} mono />
-            <Row label="Passport" value={m(s.passportNumber ?? '—', 'full')} mono />
+            <Row label="Registration serial" value={s.registrationSerial ? m(s.registrationSerial) : 'Unavailable'} mono />
+            <Row label="Passport" value={s.passportNumber ? m(s.passportNumber, 'full') : 'Unavailable'} mono />
             <Row label="KRA PIN" value={m(s.kraPin)} mono />
             <Row label="Primary phone" value={m(s.phone)} mono />
-            <Row label="Alternate phones" value={s.altPhones.length ? s.altPhones.map((p) => m(p)).join('; ') : 'None'} mono />
+            <Row label="Alternate phones" value={s.altPhones.length ? s.altPhones.map((p) => m(p)).join('; ') : 'Unavailable'} mono />
             <Row label="Email" value={m(s.email)} mono />
             <Row label="Marital status" value={s.maritalStatus} />
             <Row label="Next of kin" value={s.nextOfKin} />
             <Row label="County / sub-county" value={`${s.county} / ${s.subCounty}`} />
             <Row label="Constituency / ward" value={`${s.constituency} / ${s.ward}`} />
-            <Row label="Biometric photo match" value={`${s.photoMatchScore}%`} />
-            <Row label="Deceased registry" value={s.deceased ? 'RECORDED AS DECEASED' : 'Not recorded as deceased'} />
+            <Row label="Biometric photo match" value={reportPercent(s.photoMatchScore)} />
+            <Row label="Deceased registry" value={s.deceased === null ? 'Unknown' : s.deceased ? 'RECORDED AS DECEASED' : 'No deceased record reported'} />
           </tbody>
         </table>
       </Section>
@@ -158,22 +168,26 @@ export const PrintReport: React.FC<{ dossier: Dossier; settings: SystemSettings;
       </Section>
 
       <Section title="4. Employment history">
-        <DataTable
-          headers={['Employer', 'Position', 'From', 'To', 'Contract', 'Gross band', 'State']}
-          rows={dossier.employment.map((e) => [e.company, e.position, e.startDate, e.endDate ?? 'Present', e.contractType ?? '—', e.monthlyBand ?? '—', STATE[e.verificationState] ?? e.verificationState])}
-        />
+        {employerAvailable ? (
+          <DataTable
+            headers={['Employer', 'Position', 'From', 'To', 'Contract', 'Gross band', 'State']}
+            rows={dossier.employment.map((e) => [e.company, e.position, e.startDate, e.endDate ?? 'Present', e.contractType ?? '—', e.monthlyBand ?? '—', STATE[e.verificationState] ?? e.verificationState])}
+          />
+        ) : (
+          <p className="pr-note">Employment data unavailable.</p>
+        )}
       </Section>
 
       <Section title="5. Tax compliance (KRA)">
         <table className="pr-kv">
           <tbody>
-            <Row label="KRA PIN" value={m(dossier.tax.pin)} mono />
-            <Row label="Status" value={dossier.tax.status} />
-            <Row label="Registered on" value={dossier.tax.registeredOn} />
-            <Row label="Obligation types" value={dossier.tax.obligationTypes.join(', ')} />
-            <Row label="Last return filed" value={dossier.tax.lastReturnFiled} />
-            <Row label="Outstanding liability" value={KES(dossier.tax.outstandingKes)} mono />
-            <Row label="Good standing" value={dossier.tax.goodStanding ? 'Yes' : 'No'} />
+            <Row label="KRA PIN" value={taxAvailable && dossier.tax.pin ? m(dossier.tax.pin) : 'Unavailable'} mono />
+            <Row label="Status" value={reportStatus(dossier.tax.status, taxAvailable)} />
+            <Row label="Registered on" value={reportDate(dossier.tax.registeredOn, taxAvailable)} />
+            <Row label="Obligation types" value={taxAvailable && dossier.tax.obligationTypes.length ? dossier.tax.obligationTypes.join(', ') : 'Unavailable'} />
+            <Row label="Last return filed" value={reportDate(dossier.tax.lastReturnFiled, taxAvailable)} />
+            <Row label="Outstanding liability" value={reportAmount(dossier.tax.outstandingKes, taxAvailable)} mono />
+            <Row label="Good standing" value={reportBoolean(dossier.tax.goodStanding, taxAvailable)} />
           </tbody>
         </table>
         <DataTable
@@ -185,17 +199,17 @@ export const PrintReport: React.FC<{ dossier: Dossier; settings: SystemSettings;
       <Section title="6. Mobile money (M-PESA)">
         <table className="pr-kv">
           <tbody>
-            <Row label="Registered name" value={dossier.mobileMoney.accountName} />
-            <Row label="MSISDN" value={m(dossier.mobileMoney.msisdn)} mono />
-            <Row label="Status" value={dossier.mobileMoney.status} />
-            <Row label="Active since" value={dossier.mobileMoney.activeSince} />
-            <Row label="KYC tier" value={dossier.mobileMoney.kycTier} />
-            <Row label="Daily limit" value={KES(dossier.mobileMoney.dailyLimitKes)} mono />
-            <Row label="Single transaction limit" value={KES(dossier.mobileMoney.transactionLimitKes)} mono />
-            <Row label="Activity band" value={dossier.mobileMoney.activityBand} />
-            <Row label="Avg monthly turnover" value={KES(dossier.mobileMoney.avgMonthlyTurnoverKes)} mono />
-            <Row label="SIM swap events (24m)" value={String(dossier.mobileMoney.simSwapEvents)} />
-            <Row label="Last active" value={dossier.mobileMoney.lastActive} />
+            <Row label="Registered name" value={mpesaAvailable && dossier.mobileMoney.accountName ? dossier.mobileMoney.accountName : 'Unavailable'} />
+            <Row label="MSISDN" value={mpesaAvailable && dossier.mobileMoney.msisdn ? m(dossier.mobileMoney.msisdn) : 'Unavailable'} mono />
+            <Row label="Status" value={reportStatus(dossier.mobileMoney.status, mpesaAvailable)} />
+            <Row label="Active since" value={reportDate(dossier.mobileMoney.activeSince, mpesaAvailable)} />
+            <Row label="KYC tier" value={mpesaAvailable ? dossier.mobileMoney.kycTier : 'Unavailable'} />
+            <Row label="Daily limit" value={reportAmount(dossier.mobileMoney.dailyLimitKes, mpesaAvailable)} mono />
+            <Row label="Single transaction limit" value={reportAmount(dossier.mobileMoney.transactionLimitKes, mpesaAvailable)} mono />
+            <Row label="Activity band" value={mpesaAvailable ? dossier.mobileMoney.activityBand : 'Unavailable'} />
+            <Row label="Avg monthly turnover" value={reportAmount(dossier.mobileMoney.avgMonthlyTurnoverKes, mpesaAvailable)} mono />
+            <Row label="SIM swap events (24m)" value={reportCount(dossier.mobileMoney.simSwapEvents, mpesaAvailable)} />
+            <Row label="Last active" value={reportDate(dossier.mobileMoney.lastActive, mpesaAvailable)} />
           </tbody>
         </table>
       </Section>
@@ -203,17 +217,17 @@ export const PrintReport: React.FC<{ dossier: Dossier; settings: SystemSettings;
       <Section title="7. Credit bureau record (CRB)">
         <table className="pr-kv">
           <tbody>
-            <Row label="Bureau" value={dossier.credit.bureau} />
-            <Row label="Credit score" value={`${dossier.credit.score} / 900`} mono />
-            <Row label="Score band" value={dossier.credit.scoreBand} />
-            <Row label="Listing status" value={dossier.credit.listingStatus} />
-            <Row label="Total facilities" value={String(dossier.credit.totalFacilities)} />
-            <Row label="Total limit" value={KES(dossier.credit.totalLimitKes)} mono />
-            <Row label="Total outstanding" value={KES(dossier.credit.totalOutstandingKes)} mono />
-            <Row label="Utilisation" value={`${dossier.credit.utilisationPct}%`} mono />
-            <Row label="Oldest facility" value={dossier.credit.oldestFacility} />
-            <Row label="Enquiries (12m)" value={String(dossier.credit.enquiries12m)} />
-            <Row label="Adverse listings" value={dossier.credit.adverseListings.length ? String(dossier.credit.adverseListings.length) : 'None'} />
+            <Row label="Bureau" value={creditAvailable ? dossier.credit.bureau : 'Unavailable'} />
+            <Row label="Credit score" value={reportScore(dossier.credit.score, creditAvailable, 900)} mono />
+            <Row label="Score band" value={reportStatus(dossier.credit.scoreBand, creditAvailable)} />
+            <Row label="Listing status" value={reportStatus(dossier.credit.listingStatus, creditAvailable)} />
+            <Row label="Total facilities" value={reportCount(dossier.credit.totalFacilities, creditAvailable)} />
+            <Row label="Total limit" value={reportAmount(dossier.credit.totalLimitKes, creditAvailable)} mono />
+            <Row label="Total outstanding" value={reportAmount(dossier.credit.totalOutstandingKes, creditAvailable)} mono />
+            <Row label="Utilisation" value={reportPercent(dossier.credit.utilisationPct, creditAvailable)} mono />
+            <Row label="Oldest facility" value={reportDate(dossier.credit.oldestFacility, creditAvailable)} />
+            <Row label="Enquiries (12m)" value={reportCount(dossier.credit.enquiries12m, creditAvailable)} />
+            <Row label="Adverse listings" value={creditAvailable ? (dossier.credit.adverseListings.length ? String(dossier.credit.adverseListings.length) : 'None reported') : 'Unavailable'} />
           </tbody>
         </table>
         <DataTable
@@ -231,14 +245,14 @@ export const PrintReport: React.FC<{ dossier: Dossier; settings: SystemSettings;
       <Section title="8. Utility & address corroboration">
         <table className="pr-kv">
           <tbody>
-            <Row label="Provider" value={dossier.utility.provider} />
-            <Row label="Meter number" value={m(dossier.utility.meterNumber)} mono />
-            <Row label="Account status" value={dossier.utility.accountStatus} />
-            <Row label="Connected since" value={dossier.utility.connectedSince} />
-            <Row label="Avg monthly bill" value={KES(dossier.utility.avgMonthlyBillKes)} mono />
-            <Row label="Arrears" value={KES(dossier.utility.arrearsKes)} mono />
-            <Row label="Payment behaviour" value={dossier.utility.paymentBehaviour} />
-            <Row label="Last payment" value={dossier.utility.lastPayment} />
+            <Row label="Provider" value={utilityAvailable ? dossier.utility.provider : 'Unavailable'} />
+            <Row label="Meter number" value={utilityAvailable && dossier.utility.meterNumber ? m(dossier.utility.meterNumber) : 'Unavailable'} mono />
+            <Row label="Account status" value={reportStatus(dossier.utility.accountStatus, utilityAvailable)} />
+            <Row label="Connected since" value={reportDate(dossier.utility.connectedSince, utilityAvailable)} />
+            <Row label="Avg monthly bill" value={reportAmount(dossier.utility.avgMonthlyBillKes, utilityAvailable)} mono />
+            <Row label="Arrears" value={reportAmount(dossier.utility.arrearsKes, utilityAvailable)} mono />
+            <Row label="Payment behaviour" value={utilityAvailable ? dossier.utility.paymentBehaviour : 'Unavailable'} />
+            <Row label="Last payment" value={reportDate(dossier.utility.lastPayment, utilityAvailable)} />
           </tbody>
         </table>
       </Section>
@@ -246,9 +260,9 @@ export const PrintReport: React.FC<{ dossier: Dossier; settings: SystemSettings;
       <Section title="9. Business interests (KYB)">
         <table className="pr-kv">
           <tbody>
-            <Row label="Registered director" value={dossier.business.isDirector ? 'Yes' : 'No'} />
-            <Row label="Beneficial owner" value={dossier.business.isBeneficialOwner ? 'Yes' : 'No'} />
-            <Row label="Sole proprietorships" value={String(dossier.business.soleProprietorships)} />
+            <Row label="Registered director" value={reportBoolean(dossier.business.isDirector, businessAvailable)} />
+            <Row label="Beneficial owner" value={reportBoolean(dossier.business.isBeneficialOwner, businessAvailable)} />
+            <Row label="Sole proprietorships" value={reportCount(dossier.business.soleProprietorships, businessAvailable)} />
           </tbody>
         </table>
         <DataTable
@@ -260,14 +274,14 @@ export const PrintReport: React.FC<{ dossier: Dossier; settings: SystemSettings;
       <Section title="10. PEP, sanctions & adverse media">
         <table className="pr-kv">
           <tbody>
-            <Row label="PEP status" value={dossier.screening.pep ? 'IDENTIFIED' : 'Not a PEP'} />
-            <Row label="PEP detail" value={dossier.screening.pepDetail} />
-            <Row label="Sanctions" value={dossier.screening.sanctions ? 'MATCH FOUND' : 'No match'} />
-            <Row label="Sanctions detail" value={dossier.screening.sanctionsDetail} />
-            <Row label="Adverse media hits" value={String(dossier.screening.adverseMedia)} />
-            <Row label="Civil litigation" value={String(dossier.screening.civilLitigation)} />
-            <Row label="Insolvency" value={dossier.screening.insolvency ? 'RECORDED' : 'None'} />
-            <Row label="Criminal records" value={dossier.screening.criminalRecords.length ? String(dossier.screening.criminalRecords.length) : 'None found'} />
+            <Row label="PEP status" value={screeningAvailable ? (dossier.screening.pep === null ? 'Unknown' : dossier.screening.pep ? 'IDENTIFIED' : 'No PEP reported') : 'Unavailable'} />
+            <Row label="PEP detail" value={screeningAvailable ? dossier.screening.pepDetail : 'Unavailable'} />
+            <Row label="Sanctions" value={screeningAvailable ? (dossier.screening.sanctions === null ? 'Unknown' : dossier.screening.sanctions ? 'MATCH FOUND' : 'No match reported') : 'Unavailable'} />
+            <Row label="Sanctions detail" value={screeningAvailable ? dossier.screening.sanctionsDetail : 'Unavailable'} />
+            <Row label="Adverse media hits" value={reportCount(dossier.screening.adverseMedia, screeningAvailable)} />
+            <Row label="Civil litigation" value={reportCount(dossier.screening.civilLitigation, screeningAvailable)} />
+            <Row label="Insolvency" value={screeningAvailable ? (dossier.screening.insolvency === null ? 'Unknown' : dossier.screening.insolvency ? 'RECORDED' : 'No record reported') : 'Unavailable'} />
+            <Row label="Criminal records" value={screeningAvailable ? (dossier.screening.criminalRecords.length ? String(dossier.screening.criminalRecords.length) : 'No records reported') : 'Unavailable'} />
           </tbody>
         </table>
       </Section>
@@ -294,8 +308,8 @@ export const PrintReport: React.FC<{ dossier: Dossier; settings: SystemSettings;
               <tbody>
                 <Row label="Source system" value={sec.provider} />
                 <Row label="Retrieved" value={formatDate(sec.retrievedAt, true)} />
-                <Row label="State / confidence" value={`${STATE[sec.state] ?? sec.state} · ${sec.confidence}%`} />
-                <Row label="Latency / cost" value={`${sec.latencyMs} ms · ${KES(sec.costKes)}`} mono />
+                 <Row label="State / confidence" value={`${STATE[sec.state] ?? sec.state} · ${reportConfidence(sec.confidence)}`} />
+                <Row label="Latency / cost" value={`${reportLatency(sec.latencyMs)} · ${KES(sec.costKes)}`} mono />
               </tbody>
             </table>
             <DataTable
@@ -306,7 +320,7 @@ export const PrintReport: React.FC<{ dossier: Dossier; settings: SystemSettings;
                 f.masked && mask ? m(String(f.value)) : fmt(f.value),
                 f.source ?? '—',
                 f.retrievedAt ? formatDate(f.retrievedAt, true) : '—',
-                f.confidence !== undefined ? `${f.confidence}%` : '—',
+                f.confidence !== undefined ? `${f.confidence}%` : 'Not provided',
                 f.matchRule ?? '—',
               ])}
             />
@@ -335,7 +349,7 @@ export const PrintReport: React.FC<{ dossier: Dossier; settings: SystemSettings;
             e.provider,
             e.endpoint,
             String(e.responseCode),
-            `${e.latencyMs} ms`,
+            reportLatency(e.latencyMs),
             KES(e.costKes),
             STATE[e.outcome] ?? e.outcome,
             e.consentRef,

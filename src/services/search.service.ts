@@ -6,6 +6,8 @@ import { providerService } from './provider.service';
 import { can } from '../auth/permissions';
 import { dossierForQuery, dossierToProfile } from '../data/dossier';
 import { priceChecks } from '../data/pricing';
+import { spinModuleForItem } from '../data/spinModules';
+import { api, ApiError, fallbackToLocal, getApiMode } from './http';
 import { sleep, uid } from '../lib/format';
 
 /**
@@ -90,6 +92,91 @@ const ITEM_PROVIDER_NAME: Record<string, string> = {
   'p-ntsa': 'NTSA Vehicle Register',
 };
 
+interface BackendVerification {
+  ok: boolean;
+  result?: Dossier;
+  reference?: string;
+  costKes?: number;
+  message?: string;
+}
+
+const backendIdentifier = (req: SearchRequest, searchType: string) => {
+  if (['MPESAKYCCHECK', 'sim_swap', 'PHONESEARCH'].includes(searchType)) return req.phone || req.idNumber;
+  return req.idNumber || req.phone || req.fullName;
+};
+
+const persistBackendDossier = (req: SearchRequest, dossier: Dossier, costKes: number) => {
+  const profile = dossierToProfile(dossier);
+  const riskScoreAvailable = dossier.risk.score !== null && dossier.risk.score !== undefined;
+  const notificationTitle = !dossier.risk.reviewRequired ? 'Report ready' : riskScoreAvailable ? 'High-risk subject flagged' : 'Manual review required';
+  const notificationDescription = riskScoreAvailable
+    ? `${dossier.subject.fullName} scored ${dossier.risk.score}/100 — ${dossier.risk.verdict}. Manual review required.`
+    : `${dossier.subject.fullName} has no provider risk score. Manual review is required before proceeding.`;
+  setState((prev) => ({
+    activeDossier: dossier,
+    dossierCache: { ...prev.dossierCache, [dossier.id]: dossier },
+    searchHistory: [
+      { query: req.idNumber || req.phone || req.fullName, at: new Date().toISOString(), subject: dossier.subject.fullName, costKes, userId: req.actor?.id ?? 'system' },
+      ...prev.searchHistory,
+    ].slice(0, 50),
+    activities: [
+      { id: uid('a'), title: `Identity Report — ${dossier.subject.fullName}`, time: 'Just now', status: 'Completed', type: 'identity', userId: req.actor?.id ?? 'system' },
+      ...prev.activities,
+    ].slice(0, 20),
+    notifications: [
+      {
+        id: uid('n'),
+        title: notificationTitle,
+        description: dossier.risk.reviewRequired ? notificationDescription : `Full identity report for ${dossier.subject.fullName} is ready (${dossier.reportId}).`,
+        time: 'Just now',
+        category: dossier.risk.reviewRequired ? 'Security' : 'Reports',
+        type: dossier.risk.reviewRequired ? 'danger' : 'info',
+        read: false,
+        userId: req.actor?.id ?? 'system',
+      },
+      ...prev.notifications,
+    ],
+    lastSearch: { query: req.idNumber || req.phone || req.fullName, profile, timestamp: dossier.generatedAt, riskScore: dossier.risk.score },
+  }));
+};
+
+const runBackend = async (req: SearchRequest): Promise<SearchOutcome | null> => {
+  const results: BackendVerification[] = [];
+  for (const itemId of req.checkIds) {
+    const module = spinModuleForItem(itemId);
+    if (!module) return { ok: false, message: `No Spin module is configured for ${itemId}.` };
+    const identifier = backendIdentifier(req, module.searchType);
+    if (!identifier) return { ok: false, message: `A subject identifier is required for ${module.name}.` };
+    try {
+      const response = await api.post<BackendVerification>('/api/v1/verify/session', {
+        search_type: module.searchType,
+        identifier,
+        consent: true,
+      });
+      if (!response.ok) return { ok: false, message: response.message ?? 'The verification provider rejected the request.' };
+      results.push(response);
+    } catch (error) {
+      if (error instanceof ApiError && error.status) return { ok: false, message: error.message };
+      fallbackToLocal();
+      return null;
+    }
+  }
+
+  const dossier = results[0]?.result;
+  if (!dossier?.subject || !dossier?.risk) return { ok: false, message: 'The verification provider returned an unreadable dossier.' };
+  const costKes = results.reduce((sum, result) => sum + (result.costKes ?? 0), 0);
+  const reference = results[0]?.reference ?? `DOS-${new Date().getFullYear()}-${uid('local')}`;
+  persistBackendDossier(req, dossier, costKes);
+  return {
+    ok: true,
+    dossier,
+    costKes,
+    reference,
+    consentRef: reference,
+    stages: results.map((_result, index) => ({ label: `Provider check ${index + 1}`, ok: true, ms: 0 })),
+  };
+};
+
 export const searchService = {
   price(checkIds: string[]): number {
     return priceChecks(checkIds).total;
@@ -119,6 +206,10 @@ export const searchService = {
   },
 
   async run(req: SearchRequest): Promise<SearchOutcome> {
+    if (getApiMode() === 'api') {
+      const backend = await runBackend(req);
+      if (backend) return backend;
+    }
     const s = getSnapshot();
     const pre = searchService.preflight(req.actor, req.checkIds);
     if (!pre.ok || !req.actor) return { ok: false, message: pre.reason ?? 'Search rejected.' };
@@ -217,9 +308,11 @@ export const searchService = {
       notifications: [
         {
           id: uid('n'),
-          title: dossier.risk.reviewRequired ? 'High-risk subject flagged' : 'Report ready',
+          title: dossier.risk.reviewRequired ? (dossier.risk.score === null ? 'Manual review required' : 'High-risk subject flagged') : 'Report ready',
           description: dossier.risk.reviewRequired
-            ? `${dossier.subject.fullName} scored ${dossier.risk.score}/100 — ${dossier.risk.verdict}. Manual review required.`
+            ? dossier.risk.score === null
+              ? `${dossier.subject.fullName} has no provider risk score. Manual review is required before proceeding.`
+              : `${dossier.subject.fullName} scored ${dossier.risk.score}/100 — ${dossier.risk.verdict}. Manual review required.`
             : `Full identity report for ${dossier.subject.fullName} is ready (${dossier.reportId}).`,
           time: 'Just now',
           category: dossier.risk.reviewRequired ? 'Security' : 'Reports',
@@ -241,7 +334,7 @@ export const searchService = {
       entityId: reference,
       severity: dossier.risk.reviewRequired ? 'warning' : 'info',
       ip: actor.lastLoginIp ?? '0.0.0.0',
-      detail: `${dossier.subject.fullName} — ${req.checkIds.length} checks, KES ${price.total.toLocaleString('en-KE')}, score ${dossier.risk.score}/100, consent ${consentRef}`,
+      detail: `${dossier.subject.fullName} — ${req.checkIds.length} checks, KES ${price.total.toLocaleString('en-KE')}, score ${dossier.risk.score === null ? 'unavailable' : `${dossier.risk.score}/100`}, consent ${consentRef}`,
     });
 
     return { ok: true, dossier, costKes: price.total, reference, consentRef, stages };
@@ -253,5 +346,5 @@ export interface LegacySearchResult {
   query: string;
   profile: ReturnType<typeof dossierToProfile>;
   timestamp: string;
-  riskScore: number;
+  riskScore: number | null;
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Settings, Building2, Palette, ShieldCheck, Scale, Gauge, CreditCard, PlugZap, Cpu, Database,
   Save, RotateCcw, Download, Upload, AlertTriangle, Lock, CheckCircle2, Power, Terminal, Info,
@@ -11,8 +11,9 @@ import {
 import { SETTINGS_GROUPS } from '../../data/settings';
 import { settingsService } from '../../services/settings.service';
 import { downloadText } from '../../lib/format';
+import { api } from '../../services/http';
 import { TIER_META } from '../../auth/permissions';
-import type { RoleTier, SystemSettings } from '../../types';
+import type { IprsBackup, RoleTier, SystemSettings } from '../../types';
 
 type GroupKey = keyof SystemSettings;
 
@@ -255,6 +256,9 @@ export const SystemSettingsScreen: React.FC = () => {
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
   const [showSecrets, setShowSecrets] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupMessage, setBackupMessage] = useState('');
+  const restoreInput = useRef<HTMLInputElement>(null);
 
   const meta = SETTINGS_GROUPS.find((g) => g.key === group)!;
   const editable = canEditSettingsGroup(group);
@@ -273,6 +277,43 @@ export const SystemSettingsScreen: React.FC = () => {
     const res = await updateSettings(group, draft as Partial<SystemSettings[typeof group]>);
     setSaving(false);
     if (res.ok) setDraft(settings[group]);
+  };
+
+  const exportBackup = async () => {
+    if (apiMode !== 'api') {
+      setBackupMessage('Backup export requires the Node + SQLite backend.');
+      return;
+    }
+    setBackupBusy(true);
+    setBackupMessage('');
+    try {
+      const backup = await api.get<IprsBackup>('/api/admin/backup');
+      downloadText(JSON.stringify(backup, null, 2), 'iprs-backup.json', 'application/json');
+      setBackupMessage('Backup downloaded. Sessions, in-flight STK intents, and credentials were excluded.');
+    } catch {
+      setBackupMessage('Backup export failed. Verify the backend and Super Admin access.');
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const restoreBackup = async (file: File) => {
+    if (apiMode !== 'api') {
+      setBackupMessage('Backup restore requires the Node + SQLite backend.');
+      return;
+    }
+    setBackupBusy(true);
+    setBackupMessage('');
+    try {
+      const payload = JSON.parse(await file.text()) as IprsBackup;
+      await api.post('/api/admin/restore', payload);
+      setBackupMessage('Backup restored transactionally. Current auth and callback secrets were preserved.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Backup restore failed.';
+      setBackupMessage(message);
+    } finally {
+      setBackupBusy(false);
+    }
   };
 
   return (
@@ -420,11 +461,21 @@ export const SystemSettingsScreen: React.FC = () => {
               </ul>
             </Panel>
           )}
-          {group === 'backup' && (
-            <Callout tone="info" title="Demo storage">
-              In this build the workspace persists to browser storage under the <code className="font-mono">iprs.v1</code> key. When
-              the Node + SQLite backend is connected, snapshots are written server-side on the schedule configured above.
-            </Callout>
+          {group === 'backup' && currentUser?.tier === 'super_admin' && (
+            <Panel title="Backup & Recovery" subtitle="Super Admin only · versioned, transactional server snapshots" icon={<Database size={14} className="text-sky-400" />}>
+              {apiMode !== 'api' && (
+                <Callout tone="warning" title="Backend required" className="mb-3">
+                  Local fallback mode cannot export or restore the authoritative SQLite database. Start the Node backend to use backup operations.
+                </Callout>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="primary" icon={<Download size={12} />} loading={backupBusy} disabled={apiMode !== 'api'} onClick={() => void exportBackup()}>Download backup</Button>
+                <Button size="sm" variant="secondary" icon={<Upload size={12} />} loading={backupBusy} disabled={apiMode !== 'api'} onClick={() => restoreInput.current?.click()}>Restore backup</Button>
+                <input ref={restoreInput} type="file" accept="application/json,.json" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void restoreBackup(file); }} />
+              </div>
+              {backupMessage && <p className="mt-3 text-[10px] text-slate-400" role="status">{backupMessage}</p>}
+              <p className="mt-3 text-[10px] text-slate-600">Exports exclude sessions and in-flight STK intents. Restore preserves the current signing and callback secrets and rejects unsupported versions before opening a transaction.</p>
+            </Panel>
           )}
         </div>
       </div>

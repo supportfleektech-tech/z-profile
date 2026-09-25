@@ -1,6 +1,7 @@
 import type { AuditEntry, Dossier, InvoiceItem, PaymentRecord, PricingCatalog, SystemSettings, Wallet, WalletTransaction } from '../types';
 import { COLORS, PdfDocument, severityColor } from './pdf';
 import { formatDate, KES, maskPii, num } from './format';
+import { hasReportSection, reportAmount, reportBoolean, reportConfidence, reportCount, reportDate, reportLatency, reportPercent, reportScore, reportStatus, riskScoreAvailable } from './report-values';
 
 /**
  * Document generators.
@@ -11,7 +12,7 @@ import { formatDate, KES, maskPii, num } from './format';
  */
 
 const fmt = (v: string | number | boolean | null | undefined): string =>
-  v === null || v === undefined || v === '' ? '—' : typeof v === 'boolean' ? (v ? 'Yes' : 'No') : String(v);
+  v === null || v === undefined || v === '' ? 'Not provided' : typeof v === 'boolean' ? (v ? 'Yes' : 'No') : String(v);
 
 const stateLabel = (s: string): string =>
   ({ verified: 'VERIFIED', partial: 'PARTIAL', not_found: 'NO RECORD', mismatch: 'MISMATCH', insufficient: 'INSUFFICIENT' }[s] ?? s.toUpperCase());
@@ -24,6 +25,13 @@ export function buildFullReportPdf(dossier: Dossier, settings: SystemSettings, o
     shouldMask ? maskPii(fmt(v), mode) : fmt(v);
 
   const s = dossier.subject;
+  const taxAvailable = hasReportSection(dossier, ['kra']);
+  const mpesaAvailable = hasReportSection(dossier, ['mpesa']);
+  const creditAvailable = hasReportSection(dossier, ['crb', 'credit']);
+  const utilityAvailable = hasReportSection(dossier, ['kplc', 'utility']);
+  const businessAvailable = hasReportSection(dossier, ['business', 'company']);
+  const screeningAvailable = hasReportSection(dossier, ['screening', 'pep', 'sanction', 'criminal']);
+  const riskAvailable = riskScoreAvailable(dossier);
   const doc = new PdfDocument({
     title: `Identity Verification Report — ${s.fullName}`,
     author: 'IPRS Kenya',
@@ -39,11 +47,14 @@ export function buildFullReportPdf(dossier: Dossier, settings: SystemSettings, o
   doc.heading('Identity Verification Report', 1);
   doc.text(`${s.fullName} · National ID ${mask(s.idNumber)} · Report ${dossier.reportId}`, { size: 10, color: COLORS.slate });
   doc.spacer(4);
+  if (dossier.dataMode === 'simulated') {
+    doc.callout('SIMULATED VERIFICATION', 'Seeded demo data — this document does not represent a live registry response.', { accent: COLORS.amber });
+  }
 
   doc.callout(
     `Determination — ${dossier.risk.verdict}`,
-    `Composite trust score ${dossier.risk.score}/100 (${dossier.risk.band} Risk). ${dossier.risk.recommendation} Manual review ${dossier.risk.reviewRequired ? 'REQUIRED' : 'not required'}.`,
-    { accent: dossier.risk.band === 'Low' ? COLORS.green : dossier.risk.band === 'Medium' ? COLORS.amber : COLORS.red }
+    `Composite trust score ${riskAvailable ? `${dossier.risk.score}/100` : 'unavailable'} (${riskAvailable ? `${dossier.risk.band} Risk` : 'risk unknown'}). ${dossier.risk.recommendation} Manual review ${dossier.risk.reviewRequired ? 'REQUIRED' : 'not required'}.`,
+     { accent: dossier.risk.band === 'Low' ? COLORS.green : dossier.risk.band === 'Medium' ? COLORS.amber : dossier.risk.band === 'High' ? COLORS.red : COLORS.slate }
   );
 
   doc.heading('Report Control', 2);
@@ -66,24 +77,24 @@ export function buildFullReportPdf(dossier: Dossier, settings: SystemSettings, o
   doc.keyValue([
     ['Full name', s.fullName],
     ['Given / middle / family', [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' / ')],
-    ['Known aliases', s.aliases.length ? s.aliases.join('; ') : 'None on record'],
+    ['Known aliases', s.aliases.length ? s.aliases.join('; ') : 'Unavailable'],
     ['Gender', s.gender],
     ['Date of birth', `${s.dob} (${s.dobRaw})`],
     ['Nationality', s.nationality],
     ['National ID number', mask(s.idNumber)],
     ['ID document type', s.idType],
-    ['Registration serial', mask(s.registrationSerial ?? '—')],
-    ['Passport number', mask(s.passportNumber ?? '—', 'full')],
+    ['Registration serial', s.registrationSerial ? mask(s.registrationSerial) : 'Unavailable'],
+    ['Passport number', s.passportNumber ? mask(s.passportNumber, 'full') : 'Unavailable'],
     ['KRA PIN', mask(s.kraPin)],
     ['Primary phone', mask(s.phone)],
-    ['Alternate phone(s)', s.altPhones.length ? s.altPhones.map((p) => mask(p)).join('; ') : 'None'],
+    ['Alternate phone(s)', s.altPhones.length ? s.altPhones.map((p) => mask(p)).join('; ') : 'Unavailable'],
     ['Email address', mask(s.email)],
     ['Marital status', s.maritalStatus],
     ['Next of kin', s.nextOfKin],
     ['County / sub-county', `${s.county} / ${s.subCounty}`],
     ['Constituency / ward', `${s.constituency} / ${s.ward}`],
-    ['Biometric photo match', `${s.photoMatchScore}%`],
-    ['Deceased registry flag', s.deceased ? 'RECORDED AS DECEASED' : 'Not recorded as deceased'],
+    ['Biometric photo match', reportPercent(s.photoMatchScore)],
+    ['Deceased registry flag', s.deceased === null ? 'Unknown' : s.deceased ? 'RECORDED AS DECEASED' : 'No deceased record reported'],
   ]);
 
   /* -------------------------------- addresses -------------------------------- */
@@ -117,13 +128,13 @@ export function buildFullReportPdf(dossier: Dossier, settings: SystemSettings, o
   /* ----------------------------------- tax ----------------------------------- */
   doc.heading('5. Tax Compliance (KRA)', 2);
   doc.keyValue([
-    ['KRA PIN', mask(dossier.tax.pin)],
-    ['Status', dossier.tax.status],
-    ['Registered on', dossier.tax.registeredOn],
-    ['Obligation types', dossier.tax.obligationTypes.join(', ')],
-    ['Last return filed', dossier.tax.lastReturnFiled],
-    ['Outstanding liability', KES(dossier.tax.outstandingKes)],
-    ['Good standing', dossier.tax.goodStanding ? 'Yes' : 'No'],
+    ['KRA PIN', taxAvailable && dossier.tax.pin ? mask(dossier.tax.pin) : 'Unavailable'],
+    ['Status', reportStatus(dossier.tax.status, taxAvailable)],
+    ['Registered on', reportDate(dossier.tax.registeredOn, taxAvailable)],
+    ['Obligation types', taxAvailable && dossier.tax.obligationTypes.length ? dossier.tax.obligationTypes.join(', ') : 'Unavailable'],
+    ['Last return filed', reportDate(dossier.tax.lastReturnFiled, taxAvailable)],
+    ['Outstanding liability', reportAmount(dossier.tax.outstandingKes, taxAvailable)],
+    ['Good standing', reportBoolean(dossier.tax.goodStanding, taxAvailable)],
   ]);
   doc.spacer(2);
   doc.table(
@@ -138,35 +149,35 @@ export function buildFullReportPdf(dossier: Dossier, settings: SystemSettings, o
   doc.heading('6. Mobile Money (M-PESA)', 2);
   const mm = dossier.mobileMoney;
   doc.keyValue([
-    ['Registered account name', mm.accountName],
-    ['MSISDN', mask(mm.msisdn)],
-    ['Account status', mm.status],
-    ['Active since', mm.activeSince],
-    ['KYC tier', mm.kycTier],
-    ['Daily transaction limit', KES(mm.dailyLimitKes)],
-    ['Single transaction limit', KES(mm.transactionLimitKes)],
-    ['Activity band', mm.activityBand],
-    ['Average monthly turnover', KES(mm.avgMonthlyTurnoverKes)],
-    ['SIM swap events (24 months)', String(mm.simSwapEvents)],
-    ['Last active', mm.lastActive],
+    ['Registered account name', mpesaAvailable && mm.accountName ? mm.accountName : 'Unavailable'],
+    ['MSISDN', mpesaAvailable && mm.msisdn ? mask(mm.msisdn) : 'Unavailable'],
+    ['Account status', reportStatus(mm.status, mpesaAvailable)],
+    ['Active since', reportDate(mm.activeSince, mpesaAvailable)],
+    ['KYC tier', mpesaAvailable ? mm.kycTier : 'Unavailable'],
+    ['Daily transaction limit', reportAmount(mm.dailyLimitKes, mpesaAvailable)],
+    ['Single transaction limit', reportAmount(mm.transactionLimitKes, mpesaAvailable)],
+    ['Activity band', mpesaAvailable ? mm.activityBand : 'Unavailable'],
+    ['Average monthly turnover', reportAmount(mm.avgMonthlyTurnoverKes, mpesaAvailable)],
+    ['SIM swap events (24 months)', reportCount(mm.simSwapEvents, mpesaAvailable)],
+    ['Last active', reportDate(mm.lastActive, mpesaAvailable)],
   ]);
 
   /* ---------------------------------- credit ---------------------------------- */
   doc.heading('7. Credit Bureau Record (CRB)', 2);
   const cr = dossier.credit;
   doc.keyValue([
-    ['Bureau', cr.bureau],
-    ['Credit score', `${cr.score} / 900`],
-    ['Score band', cr.scoreBand],
-    ['Listing status', cr.listingStatus],
-    ['Total facilities', `${cr.totalFacilities} (open and closed)`],
-    ['Total credit limit', KES(cr.totalLimitKes)],
-    ['Total outstanding', KES(cr.totalOutstandingKes)],
-    ['Utilisation', `${cr.utilisationPct}%`],
-    ['Oldest facility', cr.oldestFacility],
-    ['Enquiries (12 months)', String(cr.enquiries12m)],
-    ['Days since last enquiry', String(cr.daysSinceLastEnquiry)],
-    ['Adverse listings', cr.adverseListings.length ? String(cr.adverseListings.length) : 'None'],
+    ['Bureau', creditAvailable ? cr.bureau : 'Unavailable'],
+    ['Credit score', reportScore(cr.score, creditAvailable, 900)],
+    ['Score band', reportStatus(cr.scoreBand, creditAvailable)],
+    ['Listing status', reportStatus(cr.listingStatus, creditAvailable)],
+    ['Total facilities', creditAvailable && cr.totalFacilities !== null && cr.totalFacilities !== undefined ? `${cr.totalFacilities} (open and closed)` : 'Unavailable'],
+    ['Total credit limit', reportAmount(cr.totalLimitKes, creditAvailable)],
+    ['Total outstanding', reportAmount(cr.totalOutstandingKes, creditAvailable)],
+    ['Utilisation', reportPercent(cr.utilisationPct, creditAvailable)],
+    ['Oldest facility', reportDate(cr.oldestFacility, creditAvailable)],
+    ['Enquiries (12 months)', reportCount(cr.enquiries12m, creditAvailable)],
+    ['Days since last enquiry', reportCount(cr.daysSinceLastEnquiry, creditAvailable)],
+    ['Adverse listings', creditAvailable ? (cr.adverseListings.length ? String(cr.adverseListings.length) : 'None reported') : 'Unavailable'],
   ]);
   doc.spacer(2);
   doc.table(
@@ -188,22 +199,22 @@ export function buildFullReportPdf(dossier: Dossier, settings: SystemSettings, o
   doc.heading('8. Utility & Address Corroboration', 2);
   const u = dossier.utility;
   doc.keyValue([
-    ['Provider', u.provider],
-    ['Meter / account number', mask(u.meterNumber)],
-    ['Account status', u.accountStatus],
-    ['Connected since', u.connectedSince],
-    ['Average monthly bill', KES(u.avgMonthlyBillKes)],
-    ['Arrears', KES(u.arrearsKes)],
-    ['Payment behaviour', u.paymentBehaviour],
-    ['Last payment', u.lastPayment],
+    ['Provider', utilityAvailable ? u.provider : 'Unavailable'],
+    ['Meter / account number', utilityAvailable && u.meterNumber ? mask(u.meterNumber) : 'Unavailable'],
+    ['Account status', reportStatus(u.accountStatus, utilityAvailable)],
+    ['Connected since', reportDate(u.connectedSince, utilityAvailable)],
+    ['Average monthly bill', reportAmount(u.avgMonthlyBillKes, utilityAvailable)],
+    ['Arrears', reportAmount(u.arrearsKes, utilityAvailable)],
+    ['Payment behaviour', utilityAvailable ? u.paymentBehaviour : 'Unavailable'],
+    ['Last payment', reportDate(u.lastPayment, utilityAvailable)],
   ]);
 
   /* ---------------------------------- business --------------------------------- */
   doc.heading('9. Business Interests (KYB)', 2);
   doc.keyValue([
-    ['Registered director', dossier.business.isDirector ? 'Yes' : 'No'],
-    ['Beneficial owner', dossier.business.isBeneficialOwner ? 'Yes' : 'No'],
-    ['Sole proprietorships', String(dossier.business.soleProprietorships)],
+    ['Registered director', reportBoolean(dossier.business.isDirector, businessAvailable)],
+    ['Beneficial owner', reportBoolean(dossier.business.isBeneficialOwner, businessAvailable)],
+    ['Sole proprietorships', reportCount(dossier.business.soleProprietorships, businessAvailable)],
   ]);
   doc.spacer(2);
   doc.table(
@@ -217,14 +228,14 @@ export function buildFullReportPdf(dossier: Dossier, settings: SystemSettings, o
   doc.heading('10. PEP, Sanctions & Adverse Media Screening', 2);
   const sc = dossier.screening;
   doc.keyValue([
-    ['PEP status', sc.pep ? 'IDENTIFIED' : 'Not a PEP'],
-    ['PEP detail', sc.pepDetail],
-    ['Sanctions', sc.sanctions ? 'MATCH FOUND' : 'No match'],
-    ['Sanctions detail', sc.sanctionsDetail],
-    ['Adverse media hits', String(sc.adverseMedia)],
-    ['Civil litigation records', String(sc.civilLitigation)],
-    ['Insolvency / bankruptcy', sc.insolvency ? 'RECORDED' : 'None'],
-    ['Criminal records', sc.criminalRecords.length ? String(sc.criminalRecords.length) : 'None found'],
+    ['PEP status', screeningAvailable ? (sc.pep === null ? 'Unknown' : sc.pep ? 'IDENTIFIED' : 'No PEP reported') : 'Unavailable'],
+    ['PEP detail', screeningAvailable ? sc.pepDetail : 'Unavailable'],
+    ['Sanctions', screeningAvailable ? (sc.sanctions === null ? 'Unknown' : sc.sanctions ? 'MATCH FOUND' : 'No match reported') : 'Unavailable'],
+    ['Sanctions detail', screeningAvailable ? sc.sanctionsDetail : 'Unavailable'],
+    ['Adverse media hits', reportCount(sc.adverseMedia, screeningAvailable)],
+    ['Civil litigation records', reportCount(sc.civilLitigation, screeningAvailable)],
+    ['Insolvency / bankruptcy', screeningAvailable ? (sc.insolvency === null ? 'Unknown' : sc.insolvency ? 'RECORDED' : 'No record reported') : 'Unavailable'],
+    ['Criminal records', screeningAvailable ? (sc.criminalRecords.length ? String(sc.criminalRecords.length) : 'No records reported') : 'Unavailable'],
   ]);
   if (sc.criminalRecords.length) {
     doc.spacer(2);
@@ -266,8 +277,8 @@ export function buildFullReportPdf(dossier: Dossier, settings: SystemSettings, o
   );
   doc.spacer(4);
   doc.keyValue([
-    ['Composite score', `${dossier.risk.score} / 100`],
-    ['Risk band', `${dossier.risk.band} Risk`],
+     ['Composite score', riskAvailable ? `${dossier.risk.score} / 100` : 'Unavailable'],
+     ['Risk band', riskAvailable ? `${dossier.risk.band} Risk` : 'Unknown'],
     ['Model version', settings.risk.modelVersion],
     ['Band thresholds', `Low >= ${settings.risk.lowThreshold}, High < ${settings.risk.highThreshold}`],
     ['Manual review', dossier.risk.reviewRequired ? 'Required' : 'Not required'],
@@ -288,8 +299,8 @@ export function buildFullReportPdf(dossier: Dossier, settings: SystemSettings, o
     doc.table(
       [
         { cells: ['Source system', section.provider, 'Retrieved', formatDate(section.retrievedAt, true)], bold: true },
-        { cells: ['Verification state', stateLabel(section.state), 'Confidence', `${section.confidence}%`], bold: true },
-        { cells: ['Gateway latency', `${section.latencyMs} ms`, 'Cost', KES(section.costKes)], bold: true },
+        { cells: ['Verification state', stateLabel(section.state), 'Confidence', reportConfidence(section.confidence)], bold: true },
+        { cells: ['Gateway latency', reportLatency(section.latencyMs), 'Cost', KES(section.costKes)], bold: true },
       ],
       { widths: [1.6, 2.6, 1.2, 2.2], fontSize: 8.5, zebra: false }
     );
@@ -301,7 +312,7 @@ export function buildFullReportPdf(dossier: Dossier, settings: SystemSettings, o
           f.masked && shouldMask ? mask(String(f.value)) : fmt(f.value),
           f.source ?? '—',
           f.retrievedAt ? formatDate(f.retrievedAt, true) : '—',
-          f.confidence !== undefined ? `${f.confidence}%` : '—',
+          f.confidence !== undefined ? `${f.confidence}%` : 'Not provided',
           f.matchRule ?? '—',
         ],
         color: severityColor(section.state === 'verified' ? 'success' : section.state === 'mismatch' ? 'error' : 'warning'),
@@ -339,7 +350,7 @@ export function buildFullReportPdf(dossier: Dossier, settings: SystemSettings, o
         e.provider,
         e.endpoint,
         String(e.responseCode),
-        `${e.latencyMs} ms`,
+        reportLatency(e.latencyMs),
         KES(e.costKes),
         stateLabel(e.outcome),
         e.consentRef,
@@ -409,6 +420,12 @@ export function buildFullReportPdf(dossier: Dossier, settings: SystemSettings, o
 /* ============================== EXECUTIVE SUMMARY ============================== */
 
 export function buildSummaryPdf(dossier: Dossier, settings: SystemSettings): PdfDocument {
+  const taxAvailable = hasReportSection(dossier, ['kra']);
+  const mpesaAvailable = hasReportSection(dossier, ['mpesa']);
+  const creditAvailable = hasReportSection(dossier, ['crb', 'credit']);
+  const employerAvailable = hasReportSection(dossier, ['employer']);
+  const utilityAvailable = hasReportSection(dossier, ['kplc', 'utility']);
+  const screeningAvailable = hasReportSection(dossier, ['screening', 'pep', 'sanction', 'criminal']);
   const doc = new PdfDocument({
     title: `Executive Summary — ${dossier.subject.fullName}`,
     author: 'IPRS Kenya',
@@ -420,14 +437,17 @@ export function buildSummaryPdf(dossier: Dossier, settings: SystemSettings): Pdf
   });
   doc.heading('Executive Summary', 1);
   doc.text(`${dossier.subject.fullName} · ID ${dossier.subject.idNumber} · ${formatDate(dossier.generatedAt, true)}`, { size: 10, color: COLORS.slate });
-  doc.callout(dossier.risk.verdict, `${dossier.risk.recommendation} Composite score ${dossier.risk.score}/100.`, {
-    accent: dossier.risk.band === 'Low' ? COLORS.green : dossier.risk.band === 'Medium' ? COLORS.amber : COLORS.red,
+  if (dossier.dataMode === 'simulated') {
+    doc.callout('SIMULATED VERIFICATION', 'Seeded demo data — this document does not represent a live registry response.', { accent: COLORS.amber });
+  }
+  doc.callout(dossier.risk.verdict, `${dossier.risk.recommendation} Composite score ${riskScoreAvailable(dossier) ? `${dossier.risk.score}/100` : 'unavailable'}.`, {
+    accent: dossier.risk.band === 'Low' ? COLORS.green : dossier.risk.band === 'Medium' ? COLORS.amber : dossier.risk.band === 'High' ? COLORS.red : COLORS.slate,
   });
 
   doc.heading('Section status', 2);
   doc.table(
     dossier.sections.map((sec) => ({
-      cells: [sec.title, sec.provider, stateLabel(sec.state), `${sec.confidence}%`, KES(sec.costKes)],
+      cells: [sec.title, sec.provider, stateLabel(sec.state), reportConfidence(sec.confidence), KES(sec.costKes)],
       color: severityColor(sec.state === 'verified' ? 'success' : sec.state === 'mismatch' || sec.state === 'not_found' ? 'error' : 'warning'),
     })),
     { headers: ['Section', 'Source', 'State', 'Confidence', 'Cost'], widths: [2.6, 2.2, 1.2, 1, 1], fontSize: 8.5 }
@@ -435,14 +455,20 @@ export function buildSummaryPdf(dossier: Dossier, settings: SystemSettings): Pdf
 
   doc.heading('Key findings', 2);
   doc.bullets([
-    dossier.tax.goodStanding ? `KRA PIN ${dossier.tax.pin} active and in good standing; no outstanding liability.` : `KRA principal tax debt of ${KES(dossier.tax.outstandingKes)} outstanding.`,
-    `M-PESA account ${dossier.mobileMoney.msisdn} active since ${dossier.mobileMoney.activeSince} at ${dossier.mobileMoney.kycTier}.`,
-    `CRB score ${dossier.credit.score}/900 (${dossier.credit.scoreBand}); ${dossier.credit.listingStatus}.`,
-    `Employment verified with ${dossier.employment[0]?.company ?? 'n/a'} since ${dossier.employment[0]?.startDate ?? 'n/a'}.`,
-    `Utility account ${dossier.utility.accountStatus.toLowerCase()} with arrears of ${KES(dossier.utility.arrearsKes)}.`,
-    dossier.screening.pep || dossier.screening.sanctions ? 'PEP or sanctions match identified — escalate.' : 'No PEP, sanctions or adverse-media match.',
-    dossier.screening.criminalRecords.length ? `${dossier.screening.criminalRecords.length} criminal record(s) found.` : 'No criminal or civil court records found.',
-    `Debt-to-income ratio within policy threshold; disposable income estimated at KES 181,500 per month.`,
+    taxAvailable ? `KRA status ${reportStatus(dossier.tax.status, taxAvailable)}; outstanding liability ${reportAmount(dossier.tax.outstandingKes, taxAvailable)}.` : 'KRA data unavailable.',
+    mpesaAvailable ? `M-PESA status ${reportStatus(dossier.mobileMoney.status, mpesaAvailable)}; monthly turnover ${reportAmount(dossier.mobileMoney.avgMonthlyTurnoverKes, mpesaAvailable)}.` : 'M-PESA data unavailable.',
+    creditAvailable ? `CRB score ${reportScore(dossier.credit.score, creditAvailable, 900)}; listing status ${reportStatus(dossier.credit.listingStatus, creditAvailable)}.` : 'CRB data unavailable.',
+    employerAvailable && dossier.employment[0] ? `Employment reported for ${dossier.employment[0].company} since ${dossier.employment[0].startDate}.` : 'Employment data unavailable.',
+    utilityAvailable ? `Utility status ${reportStatus(dossier.utility.accountStatus, utilityAvailable)}; arrears ${reportAmount(dossier.utility.arrearsKes, utilityAvailable)}.` : 'Utility data unavailable.',
+    screeningAvailable
+      ? dossier.screening.pep === null && dossier.screening.sanctions === null
+        ? 'Screening provider did not return conclusive PEP or sanctions values.'
+        : dossier.screening.pep || dossier.screening.sanctions
+          ? 'PEP or sanctions match identified — escalate.'
+          : 'Screening returned no reported PEP or sanctions match.'
+      : 'Screening data unavailable.',
+    screeningAvailable ? (dossier.screening.criminalRecords.length ? `${dossier.screening.criminalRecords.length} criminal record(s) found.` : 'No criminal records reported by the queried source.') : 'Criminal-record data unavailable.',
+    'Disposable income is unavailable from the queried providers.',
   ]);
 
   doc.heading('Recommendation', 2);

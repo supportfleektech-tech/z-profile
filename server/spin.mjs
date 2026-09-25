@@ -39,6 +39,37 @@ function spinModulesCount() {
   return { documented: SPIN_MODULES.length, withPublishedEndpoint: SPIN_MODULES.filter((m) => m.endpoint).length };
 }
 
+export function normalizeResponse(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return { ok: false, providerCode: null, message: 'Spin returned an empty response.', data: null };
+  }
+
+  if (Object.hasOwn(raw, 'code')) {
+    const providerCode = raw.code ?? null;
+    const numericCode = Number.parseInt(String(providerCode), 10);
+    const ok = Number.isInteger(numericCode) && numericCode >= 200 && numericCode < 300;
+    return {
+      ok,
+      providerCode,
+      message: raw.message ?? (ok ? '' : 'Spin provider request failed.'),
+      data: raw.data ?? null,
+    };
+  }
+
+  if (Object.hasOwn(raw, 'response_code') || Object.hasOwn(raw, 'success')) {
+    const providerCode = raw.response_code ?? null;
+    const ok = raw.success === true && String(providerCode) === '200';
+    return {
+      ok,
+      providerCode,
+      message: raw.message ?? (ok ? '' : 'Spin provider request failed.'),
+      data: raw.data ?? null,
+    };
+  }
+
+  return { ok: false, providerCode: null, message: 'Spin returned an undocumented response envelope.', data: null };
+}
+
 let cachedToken = null;
 
 /** Obtain (or reuse) an access token. Docs: valid ~10 minutes. */
@@ -70,7 +101,7 @@ export async function search(
 ) {
   const module = moduleOrItemId.startsWith('spin-')
     ? SPIN_MODULES.find((m) => m.id === moduleOrItemId)
-    : spinModuleForItem(moduleOrItemId);
+    : spinModuleForItem(moduleOrItemId) ?? SPIN_MODULES.find((m) => m.searchType === moduleOrItemId && m.pricedItemId);
   if (!module) throw new Error(`Unknown Spin module: ${moduleOrItemId}`);
 
   const request = spinRequestBody(module, identifier, opts);
@@ -81,6 +112,11 @@ export async function search(
     body: JSON.stringify(request),
   });
   const body = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(`Spin ${module.searchType} ${res.status}: ${JSON.stringify(body).slice(0, 200)}`);
-  return { module, request, httpStatus: res.status, body };
+  if (!body || typeof body !== 'object') throw new Error(`Spin ${module.searchType} ${res.status}: returned an empty response.`);
+  const normalized = normalizeResponse(body);
+  if (!res.ok || !normalized.ok) {
+    const detail = normalized.message || normalized.providerCode || `HTTP ${res.status}`;
+    throw new Error(`Spin ${module.searchType} rejected the request: ${detail}`);
+  }
+  return { module, request, httpStatus: res.status, body, ...normalized };
 }

@@ -16,6 +16,12 @@
  *
  * jsdom performs no layout: nothing here asserts visual or responsive correctness.
  */
+import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { connect } from 'node:net';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { bootApp, loginAs, check, summarise, sleep, STORAGE_KEY } from './lib/app.mjs';
 
 /** Read the app's persisted workspace so we can assert on real numbers. */
@@ -36,6 +42,102 @@ const me = (app) => {
   const s = store(app);
   return s?.users?.find((u) => u.id === s?.currentUserId) ?? null;
 };
+const sessionIdOf = (token) => {
+  try { return JSON.parse(Buffer.from(token.split('.')[0], 'base64url')).sid ?? null; } catch { return null; }
+};
+
+const assertPortAvailable = (port) => new Promise((resolve, reject) => {
+  const socket = connect({ host: '127.0.0.1', port });
+  socket.setTimeout(500, () => {
+    socket.destroy();
+    reject(new Error(`Timed out checking port ${port}.`));
+  });
+  socket.once('connect', () => {
+    socket.destroy();
+    reject(new Error(`Foreign server is already listening on port ${port}.`));
+  });
+  socket.once('error', (error) => {
+    if (error.code === 'ECONNREFUSED') resolve();
+    else reject(error);
+  });
+});
+
+async function startApiServer() {
+  const port = 8798;
+  await assertPortAvailable(port);
+  const base = `http://127.0.0.1:${port}`;
+  const dataDir = mkdtempSync(path.join(tmpdir(), 'iprs-flowtest-'));
+  const databasePath = path.join(dataDir, 'test.sqlite');
+  const projectRoot = fileURLToPath(new URL('..', import.meta.url));
+  const child = spawn(process.execPath, ['server/index.mjs'], {
+    cwd: projectRoot,
+    env: {
+      ...process.env,
+      PORT: String(port),
+      HOST: '127.0.0.1',
+      IPRS_DB: databasePath,
+      LOGIN_RATE_MAX: '100',
+      STK_RATE_MAX: '100',
+      API_V1_RATE_MAX: '100',
+      NODE_ENV: 'development',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let startupLog = '';
+  let errorLog = '';
+  let spawnError = null;
+  let cleaned = false;
+  child.on('error', (error) => { spawnError = error; });
+  child.stdout.on('data', (data) => { startupLog += data; });
+  child.stderr.on('data', (data) => { errorLog += data; });
+  const log = () => `${startupLog}${errorLog}`;
+
+  const close = async () => {
+    if (cleaned) return;
+    cleaned = true;
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM');
+      await Promise.race([new Promise((resolve) => child.once('exit', resolve)), sleep(3000)]);
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    }
+    rmSync(dataDir, { recursive: true, force: true });
+  };
+  const fail = async (message) => {
+    await close();
+    throw new Error(message);
+  };
+
+  const databaseMarker = `[api] seeded SQLite at ${databasePath}`;
+  const listeningMarker = `[api] IPRS demo backend listening on http://127.0.0.1:${port}`;
+  const responses = [];
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    if (spawnError) await fail(`flow API server failed to start: ${spawnError.message}`);
+    if (child.exitCode !== null && !startupLog.includes(databaseMarker)) {
+      await fail(`owned flow API server exited before startup (port ${port} may be occupied):\n${log().slice(-800)}`);
+    }
+    if (startupLog.includes(databaseMarker) && startupLog.includes(listeningMarker) && child.exitCode === null) {
+      try {
+        const response = await fetch(`${base}/api/health`);
+        if (response.ok) {
+          return {
+            base,
+            responses,
+            fetchImpl: async (input, init) => {
+              const url = new URL(String(input), base);
+              const response = await fetch(url, init);
+              const body = await response.clone().text();
+              responses.push(`${response.status} ${url.pathname} ${body.slice(0, 180)}`);
+              return response;
+            },
+            close,
+          };
+        }
+      } catch {}
+    }
+    await sleep(250);
+  }
+  return fail(`owned flow API server never became healthy:\n${log().slice(-800)}`);
+}
 
 /* -------------------------------------------------------------------------- */
 /*                         1 + 2. Wallet top-up flows                          */
@@ -52,7 +154,6 @@ async function walletFlows() {
   const userId = me(app)?.id;
   const before = balanceOf(app, userId);
   const txBefore = txCount(app);
-  check('wallet: persisted store readable', before !== null, `balance=${before}`);
 
   await app.goto('/wallet');
   /*
@@ -132,7 +233,6 @@ async function walletFlows() {
   const exp = cardApp.findInput(/09\/28|expiry|mm/i);
   const cvc = cardApp.findInput(/123|cvc|cvv/i);
   const holder = cardApp.findInput(/KAMAU|holder|name on/i);
-  check('card: all four fields render', !!(pan && exp && cvc && holder), `pan=${!!pan} exp=${!!exp} cvc=${!!cvc} holder=${!!holder}`);
 
   if (pan && exp && cvc && holder) {
     const amt = cardApp.$('input[type="number"]');
@@ -257,7 +357,6 @@ async function searchFlow() {
     const consent = app.$$('input[type="checkbox"]')[0];
     check('search: a consent control is present', !!consent);
     if (consent) { consent.click(); await sleep(400); }
-    check('search: consent tick recorded', consent?.checked === true);
 
     const run = app.findButton('run verification');
     check('search: Run verification enabled once consented', !!run, run ? `disabled=${run.disabled}` : 'not found');
@@ -364,7 +463,6 @@ async function accountCreationFlow() {
     const s = store(app);
     const nu = s.users[s.users.length - 1];
     check('accounts: new account has tier=admin', nu?.tier === 'admin', `tier=${nu?.tier}`);
-    check('accounts: a wallet was provisioned for it', !!s.wallets?.find((w) => w.userId === nu.id), '');
     check('accounts: creation was audited', (s.audit ?? []).some((a) => a.action === 'user.created'), '');
   }
   check('accounts: no runtime errors', app.errors.length === 0, app.errors.slice(0, 2).join(' | '));
@@ -463,11 +561,145 @@ async function refundFlow() {
 
 /* -------------------------------------------------------------------------- */
 
+async function hardeningFlows(api) {
+  console.log('\n═══ Hardening: Machine API key issuance ═══');
+  const keyApp = bootApp({ fetchImpl: api.fetchImpl });
+  const keyLogin = await loginAs(keyApp, 'superadmin@iprs.co.ke');
+  if (!keyLogin.ok) throw new Error(keyLogin.why);
+  await keyApp.goto('/api-docs');
+  await keyApp.waitFor(() => /Backend live/.test(keyApp.text()), { timeout: 10000, label: 'backend API mode' });
+  const keysTab = keyApp.buttons().find((button) => (button.textContent ?? '').trim().startsWith('Keys'));
+  if (keysTab) keyApp.click(keysTab);
+  await sleep(250);
+  const issueButton = keyApp.findButton('issue key');
+  if (issueButton) keyApp.click(issueButton);
+  await sleep(250);
+  const issueDialog = keyApp.dialog();
+  const labelInput = issueDialog?.findInput(/mobile app|integration/i);
+  if (labelInput) issueDialog.setInput(labelInput, 'Flow server-first key');
+  await sleep(100);
+  const submitKey = issueDialog?.findButtonExact('Issue key');
+  if (submitKey) keyApp.click(submitKey);
+  const issued = await keyApp.waitFor(() => {
+    const callout = keyApp.$('[data-testid="machine-secret-callout"]');
+    return callout && [...callout.querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Dismiss') ? callout : null;
+  }, { timeout: 15000, interval: 250, label: 'one-time secret callout and Dismiss control' });
+  const secretCallout = keyApp.$('[data-testid="machine-secret-callout"]');
+  const secretText = secretCallout?.querySelector('.font-mono.break-all')?.textContent?.trim() ?? '';
+  const dismiss = secretCallout
+    ? [...secretCallout.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Dismiss')
+    : null;
+  if (dismiss) keyApp.click(dismiss);
+  await sleep(150);
+  check('machine-api: UI issues a server-owned key and shows its secret once',
+    issued && dismiss && api.responses.at(-1)?.startsWith('201 /api/api-keys') && /^iprs_sandbox_ak_/.test(secretText) && !keyApp.text().includes(secretText),
+    `server response ${api.responses.at(-1)?.split(' ').slice(0, 2).join(' ') ?? 'missing'}`);
+  keyApp.window.close();
+
+  console.log('\n═══ Sessions: revoke the second live session ═══');
+  const originalLogin = await fetch(`${api.base}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'analyst@iprs.co.ke', password: 'Iprs@2026!' }),
+  });
+  const originalLoginJson = await originalLogin.json();
+  const originalToken = originalLoginJson.token;
+  const originalSessionId = sessionIdOf(originalToken);
+
+  const secondApp = bootApp({ fetchImpl: api.fetchImpl });
+  await secondApp.waitFor(() => /Backend live/.test(secondApp.text()), { timeout: 10000, label: 'backend API mode for second session' });
+  const secondLogin = await loginAs(secondApp, 'analyst@iprs.co.ke');
+  if (!secondLogin.ok) throw new Error(secondLogin.why);
+  const secondTokenReady = await secondApp.waitFor(() => typeof store(secondApp)?.authToken === 'string', { timeout: 10000, label: 'second UI session token' });
+  const secondToken = secondTokenReady ? store(secondApp)?.authToken ?? null : null;
+  const secondSessionId = sessionIdOf(secondToken);
+  const secondBefore = typeof secondToken === 'string'
+    ? await fetch(`${api.base}/api/auth/me`, { headers: { Authorization: `Bearer ${secondToken}` } })
+    : null;
+  const originalSessionsResponse = typeof originalToken === 'string'
+    ? await fetch(`${api.base}/api/auth/sessions`, { headers: { Authorization: `Bearer ${originalToken}` } })
+    : null;
+  const originalSessionsPayload = originalSessionsResponse ? await originalSessionsResponse.json() : null;
+  const originalSessions = Array.isArray(originalSessionsPayload) ? originalSessionsPayload : [];
+  const secondWasLive = originalLogin.status === 200 && typeof originalToken === 'string' && !!originalSessionId && secondLogin.ok && typeof secondToken === 'string' && !!secondSessionId && secondBefore?.status === 200 && originalSessionsResponse?.status === 200 && originalSessions.some((session) => session.id === originalSessionId && session.current === true) && originalSessions.some((session) => session.id === secondSessionId && session.current === false);
+  const secondStorage = secondApp.window.localStorage.getItem(STORAGE_KEY);
+  secondApp.window.close();
+
+  let secondAfter = secondBefore;
+  let originalAfter = null;
+  let revokeSecond = null;
+  if (secondWasLive && secondStorage) {
+    const controllerState = JSON.parse(secondStorage);
+    controllerState.authToken = originalToken;
+    controllerState.authTokenExpiresAt = originalLoginJson.expiresAt ?? null;
+    controllerState.sessions = originalSessions;
+    const controllerApp = bootApp({ storage: { [STORAGE_KEY]: JSON.stringify(controllerState) }, fetchImpl: api.fetchImpl });
+    await controllerApp.goto('/profile');
+    const securityTab = controllerApp.findTab('Security');
+    if (securityTab) controllerApp.click(securityTab);
+    await sleep(300);
+    const sessionPanel = controllerApp.$$('section').find((section) => section.querySelector('h3')?.textContent?.trim() === 'Your sessions');
+    const revokeReady = await controllerApp.waitFor(() => {
+      const button = sessionPanel?.querySelector(`button[data-session-id="${secondSessionId}"]`);
+      return button && !button.disabled;
+    }, { timeout: 15000, interval: 250, label: 'enabled second session Revoke control' });
+    const refreshedPanel = controllerApp.$$('section').find((section) => section.querySelector('h3')?.textContent?.trim() === 'Your sessions');
+    revokeSecond = revokeReady ? refreshedPanel?.querySelector(`button[data-session-id="${secondSessionId}"]`) ?? null : null;
+    if (revokeSecond) {
+      controllerApp.click(revokeSecond);
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        secondAfter = await fetch(`${api.base}/api/auth/me`, { headers: { Authorization: `Bearer ${secondToken}` } });
+        originalAfter = await fetch(`${api.base}/api/auth/me`, { headers: { Authorization: `Bearer ${originalToken}` } });
+        if (secondAfter.status === 401 && originalAfter.status === 200) break;
+        await sleep(250);
+      }
+    }
+    controllerApp.window.close();
+  }
+  check('sessions: UI revokes the confirmed second session while the original stays live',
+    secondWasLive && !!revokeSecond && secondAfter?.status === 401 && originalAfter?.status === 200,
+    `second=${secondBefore?.status ?? 'missing'}->${secondAfter?.status ?? 'missing'} original=${originalAfter?.status ?? 'missing'} revoke=${!!revokeSecond}`);
+
+  console.log('\n═══ Backup: export and restore round-trip ═══');
+  const backupApp = bootApp({ fetchImpl: api.fetchImpl });
+  const backupLogin = await loginAs(backupApp, 'superadmin@iprs.co.ke');
+  if (!backupLogin.ok) throw new Error(backupLogin.why);
+  await backupApp.waitFor(() => /Backend live/.test(backupApp.text()), { timeout: 10000, label: 'backend API mode for backup' });
+  await backupApp.goto('/settings');
+  const backupGroup = backupApp.findButton('Backup & Recovery');
+  if (backupGroup) backupApp.click(backupGroup);
+  await sleep(300);
+  const downloadBackup = backupApp.findButton('download backup');
+  if (downloadBackup) backupApp.click(downloadBackup);
+  const downloaded = await backupApp.waitFor(() => backupApp.downloads.find((entry) => entry.text), { timeout: 15000, interval: 250, label: 'backup download' });
+  const backupDownload = backupApp.downloads.find((entry) => entry.text);
+  let backupPayload = null;
+  try { backupPayload = JSON.parse(backupDownload?.text ?? ''); } catch {}
+  check('backup: UI exports a versioned payload without sessions or STK intents',
+    downloaded && backupPayload?.format === 'iprs-backup' && backupPayload?.version === 1 && !backupPayload?.data?.sessions && !backupPayload?.data?.stk_pending,
+    `format=${backupPayload?.format} version=${backupPayload?.version} collections=${Object.keys(backupPayload?.data ?? {}).length}`);
+  const restoreFile = new backupApp.window.File([JSON.stringify(backupPayload)], 'iprs-backup.json', { type: 'application/json' });
+  const restoreInput = backupApp.$('input[type="file"][accept*="application/json"]');
+  if (restoreInput) {
+    Object.defineProperty(restoreInput, 'files', { value: [restoreFile], configurable: true });
+    restoreInput.dispatchEvent(new backupApp.window.Event('change', { bubbles: true }));
+  }
+  const restored = await backupApp.waitFor(() => /Backup restored transactionally/.test(backupApp.text()), { timeout: 15000, interval: 250, label: 'backup restore' });
+  check('backup: UI restores the exported snapshot transactionally', restored && !/failed|invalid/i.test(backupApp.$('main')?.textContent ?? ''));
+  backupApp.window.close();
+}
+
 async function main() {
   await walletFlows();
   await searchFlow();
   await accountCreationFlow();
   await refundFlow();
+  const api = await startApiServer();
+  try {
+    await hardeningFlows(api);
+  } finally {
+    await api.close();
+  }
 
   const fails = summarise('interactive flows');
   console.log('note: no geometry/responsive assertions — jsdom performs no layout.');

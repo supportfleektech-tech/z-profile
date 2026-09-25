@@ -17,7 +17,10 @@ import { bearerOf, issueToken, verifyToken } from './auth.mjs';
 import * as daraja from './daraja.mjs';
 import * as spin from './spin.mjs';
 import { hashPassword, verifyPassword } from './passwords.mjs';
-import { hashStoredPasswords } from './db.mjs';
+import { hashStoredPasswords, kvGet, kvSet } from './db.mjs';
+import { assertRequestShape, callbackToken, configureCallbackStore, originAllowed, securityHeaders } from './security.mjs';
+import { FixedWindowRateLimiter, rateLimitMiddleware } from './ratelimit.mjs';
+import { createMachineApiRouter, issueMachineApiKey, machineDependencies, publicApiKey, MACHINE_SCOPES } from './apiv1.mjs';
 import { SPIN_MODULES, SPIN_AUTH } from '../src/data/spinModules.ts';
 import express from 'express';
 import cors from 'cors';
@@ -36,6 +39,7 @@ import {
   usageRecords, putUsage,
   cases, invoices, notifications, activities,
   settings, saveSettings, pricing, savePricing,
+  createBackup, restoreBackup, validateBackup,
   stkPut, stkGet, stkSetResult, stkSetCancelled, stkDelete,
 } from './db.mjs';
 
@@ -45,7 +49,19 @@ const STARTED_AT = new Date().toISOString();
 
 const app = express();
 app.disable('x-powered-by');
-app.use(cors());
+app.use((_req, res, next) => {
+  res.set(securityHeaders());
+  next();
+});
+app.use(cors((req, callback) => {
+  const sameOrigin = `${req.protocol}://${req.get('host')}`;
+  callback(null, {
+    origin: originAllowed(req.headers.origin, sameOrigin),
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
+    maxAge: 600,
+  });
+}));
 app.use(express.json({ limit: '2mb' }));
 
 /* -------------------------------------------------------------------------- */
@@ -66,11 +82,49 @@ function publicUser(u) {
 }
 const publicUsers = (list) => (Array.isArray(list) ? list.map(publicUser) : list);
 
+const API_SECRET_KEYS = new Set([
+  'password', 'passwordHash', 'secret', 'secretHash', 'secretMasked', 'authSecret', 'callbackToken', 'authToken',
+  'consumerKey', 'consumerSecret', 'webhookSecret', 'smsApiKey', 'mpesaPasskey', 'token', 'apiKey', 'accessToken', 'privateKey',
+]);
+
+const isApiSecretKey = (key) => API_SECRET_KEYS.has(key) || /(?:password|passkey|secret|credential|privateKey|apiKey|accessToken)/i.test(key);
+
+function redactApiSecrets(value) {
+  if (Array.isArray(value)) return value.map(redactApiSecrets);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !isApiSecretKey(key))
+      .map(([key, item]) => [key, redactApiSecrets(item)]),
+  );
+}
+
+const publicProvider = (provider) => redactApiSecrets(provider);
+const publicProviders = (list) => list.map(publicProvider);
+const publicSettings = (value) => redactApiSecrets(value);
+
 const uid = (p) => `${p}_${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`;
 const now = () => new Date().toISOString();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const nonNegativeNumber = (value) => Math.max(0, Number(value) || 0);
 const clientIp = (req) =>
   (req.headers['x-forwarded-for']?.split(',')[0] ?? req.socket?.remoteAddress ?? '0.0.0.0').trim();
+const rateLimitIp = (req) => (req.ip ?? req.socket?.remoteAddress ?? '0.0.0.0').trim();
+
+configureCallbackStore({ get: (key) => kvGet(key, null), set: (key, value) => kvSet(key, value) });
+
+const loginRateLimit = rateLimitMiddleware({
+  limiter: new FixedWindowRateLimiter({ limit: Number(process.env.LOGIN_RATE_MAX ?? 15), windowMs: 300_000 }),
+  key: rateLimitIp,
+});
+const stkRateLimit = rateLimitMiddleware({
+  limiter: new FixedWindowRateLimiter({ limit: Number(process.env.STK_RATE_MAX ?? 10), windowMs: 60_000 }),
+  key: (req) => actorOf(req)?.id ?? rateLimitIp(req),
+});
+const apiV1RateLimit = rateLimitMiddleware({
+  limiter: new FixedWindowRateLimiter({ limit: Number(process.env.API_V1_RATE_MAX ?? 120), windowMs: 60_000 }),
+  key: (req) => req.machine?.key?.id ?? rateLimitIp(req),
+});
 
 /** Daraja-style receipt code: 3 letters + 7 alphanumerics. */
 const receiptCode = () => {
@@ -247,7 +301,7 @@ function applyWalletMovement({ userId, amount, direction, kind, channel, status,
     ...wallet,
     balance: balanceAfter,
     lifetimeTopUp: kind === 'topup' && status === 'success' ? wallet.lifetimeTopUp + amount : wallet.lifetimeTopUp,
-    lifetimeSpend: kind === 'search' ? wallet.lifetimeSpend + amount : wallet.lifetimeSpend,
+    lifetimeSpend: kind === 'search' ? wallet.lifetimeSpend + amount : kind === 'reversal' ? Math.max(0, wallet.lifetimeSpend - amount) : wallet.lifetimeSpend,
     updatedAt: transaction.at,
   };
 
@@ -291,7 +345,7 @@ app.get('/api/health', wrap((_req, res) => {
     uptimeSec: Math.round((Date.now() - new Date(STARTED_AT).getTime()) / 1000),
     startedAt: STARTED_AT,
     node: process.version,
-    storage: { engine: 'node:sqlite', path: DB_PATH },
+    storage: { engine: 'node:sqlite' },
     counts: stats(),
     gateway: daraja.describe(),
     spin: spin.describe(),
@@ -300,7 +354,7 @@ app.get('/api/health', wrap((_req, res) => {
 
 /* ---------------------------------- auth ---------------------------------- */
 
-app.post('/api/auth/login', wrap(async (req, res) => {
+app.post('/api/auth/login', loginRateLimit, wrap(async (req, res) => {
   const { email, password } = req.body ?? {};
   await sleep(320);
   const user = findUserByEmail(email ?? '');
@@ -352,6 +406,38 @@ app.post('/api/auth/login', wrap(async (req, res) => {
 
   const issued = issueToken(latestSession.id, updated.id);
   res.json({ ok: true, user: publicUser(updated), requiresMfa, ...issued });
+}));
+
+app.get('/api/auth/sessions', requireActor, wrap((req, res) => {
+  const verdict = verifyToken(bearerOf(req));
+  const currentSessionId = verdict.ok ? verdict.sid : null;
+  res.json(sessions().filter((session) => session.userId === req.actor.id).map((session) => ({ ...session, current: session.id === currentSessionId })));
+}));
+
+app.delete('/api/auth/sessions/:id', requireActor, wrap((req, res) => {
+  const target = sessions().find((session) => session.id === req.params.id);
+  if (!target) return bad(res, 'Session not found.', 404);
+  if (target.userId !== req.actor.id) return bad(res, 'You may only revoke your own sessions.', 403);
+  deleteSession(target.id);
+  appendAudit({
+    actorId: req.actor.id, actorName: req.actor.name, actorTier: req.actor.tier,
+    action: 'session.revoked', entity: 'Session', entityId: target.id, severity: 'warning', ip: clientIp(req),
+    detail: `Revoked own session for ${target.userName} (${target.device} · ${target.ip})`,
+  });
+  res.json({ ok: true, revoked: 1 });
+}));
+
+app.post('/api/auth/sessions/revoke-others', requireActor, wrap((req, res) => {
+  const verdict = verifyToken(bearerOf(req));
+  const currentSessionId = verdict.ok ? verdict.sid : null;
+  const ownSessions = sessions().filter((session) => session.userId === req.actor.id && session.id !== currentSessionId);
+  for (const session of ownSessions) deleteSession(session.id);
+  appendAudit({
+    actorId: req.actor.id, actorName: req.actor.name, actorTier: req.actor.tier,
+    action: 'session.revoked.others', entity: 'Session', severity: 'warning', ip: clientIp(req),
+    detail: `Revoked ${ownSessions.length} other session(s)`,
+  });
+  res.json({ ok: true, revoked: ownSessions.length });
 }));
 
 app.post('/api/auth/logout', wrap((req, res) => {
@@ -435,8 +521,21 @@ app.patch('/api/users/:id', requirePerm('users.edit'), wrap((req, res) => {
   if (target.isSystem && actor.id !== target.id) {
     return res.status(403).json({ ok: false, message: 'The Super Admin account is seeded by the system and is immutable.' });
   }
-  const patch = req.body ?? {};
-  // Guard the invariants even if a client tries to bypass the UI.
+  const checked = assertRequestShape(req.body, [
+    'name', 'email', 'phone', 'department', 'jobTitle', 'avatarUrl', 'tier', 'subRole', 'status',
+    'mfaEnabled', 'permissionOverrides', 'ipAllowlist', 'password', 'failedLoginAttempts', 'lockedUntil',
+  ]);
+  if (!checked.ok) return bad(res, checked.message);
+  const patch = checked.value;
+  if (Object.hasOwn(patch, 'email')) {
+    const email = String(patch.email).trim().toLowerCase();
+    const duplicate = findUserByEmail(email);
+    if (!email || (duplicate && duplicate.id !== target.id)) return bad(res, duplicate ? 'An account with that email already exists.' : 'Email is required.', duplicate ? 409 : 400);
+    patch.email = email;
+  }
+  if (Object.hasOwn(patch, 'password') && (typeof patch.password !== 'string' || patch.password.length < 8)) {
+    return bad(res, 'Password must be at least 8 characters.');
+  }
   if (patch.tier === 'super_admin' && !target.isSystem) {
     return res.status(403).json({ ok: false, message: 'Accounts cannot be promoted to Super Admin.' });
   }
@@ -446,18 +545,20 @@ app.patch('/api/users/:id', requirePerm('users.edit'), wrap((req, res) => {
   if (target.isSystem) delete patch.tier;
 
   const changes = Object.keys(patch).filter((k) => JSON.stringify(patch[k]) !== JSON.stringify(target[k]));
-  const next = { ...target, ...patch, id: target.id, isSystem: target.isSystem, createdAt: target.createdAt };
+  const next = {
+    ...target,
+    ...patch,
+    ...(Object.hasOwn(patch, 'password') ? { password: hashPassword(patch.password) } : {}),
+    id: target.id,
+    isSystem: target.isSystem,
+    createdAt: target.createdAt,
+  };
   putUser(next);
-
-  if (next.walletId) {
-    const w = walletById(next.walletId);
-    if (w) putWallet({ ...w, userId: next.id });
-  }
 
   appendAudit({
     actorId: actor.id, actorName: actor.name, actorTier: actor.tier, action: actor.id === target.id ? 'user.self.updated' : 'user.updated',
     entity: 'SystemUser', entityId: target.id,
-    severity: changes.some((c) => ['tier', 'status', 'permissionOverrides', 'mfaEnabled'].includes(c)) ? 'critical' : 'info',
+    severity: changes.some((c) => ['tier', 'status', 'permissionOverrides', 'mfaEnabled', 'password'].includes(c)) ? 'critical' : 'info',
     ip: clientIp(req), detail: `${target.name}: ${changes.length ? changes.join(', ') : 'no effective change'}`,
   });
   res.json({ ok: true, user: publicUser(next), message: 'Account updated.' });
@@ -514,15 +615,28 @@ app.get('/api/wallet/transactions', requireActor, wrap((req, res) => {
   res.json(transactions(userId ?? (req.actor.tier !== 'user' ? null : req.actor.id), limit));
 }));
 
-app.patch('/api/wallet/:id', wrap((req, res) => {
-  const actor = actorOf(req);
-  const w = walletById(req.params.id) ?? walletFor(req.params.id);
+app.patch('/api/wallet/:id', requireActor, wrap((req, res) => {
+  const actor = req.actor;
+  const w = walletById(req.params.id);
   if (!w) return bad(res, 'Wallet not found.', 404);
-  const patch = req.body ?? {};
-  const next = { ...w, ...patch, id: w.id, userId: w.userId, updatedAt: now() };
+  if (actor.tier === 'user' && w.userId !== actor.id) return bad(res, 'You may only update your own wallet.', 403);
+  const checked = assertRequestShape(req.body, ['autoTopUp', 'autoTopUpTriggerKes', 'autoTopUpAmountKes', 'lowBalanceAlertKes']);
+  if (!checked.ok) return bad(res, checked.message);
+  const patch = checked.value;
+  if ('autoTopUp' in patch && typeof patch.autoTopUp !== 'boolean') return bad(res, 'Request field autoTopUp must be a boolean.');
+  const next = {
+    ...w,
+    ...(Object.hasOwn(patch, 'autoTopUp') ? { autoTopUp: patch.autoTopUp } : {}),
+    ...(Object.hasOwn(patch, 'autoTopUpTriggerKes') ? { autoTopUpTriggerKes: nonNegativeNumber(patch.autoTopUpTriggerKes) } : {}),
+    ...(Object.hasOwn(patch, 'autoTopUpAmountKes') ? { autoTopUpAmountKes: nonNegativeNumber(patch.autoTopUpAmountKes) } : {}),
+    ...(Object.hasOwn(patch, 'lowBalanceAlertKes') ? { lowBalanceAlertKes: nonNegativeNumber(patch.lowBalanceAlertKes) } : {}),
+    id: w.id,
+    userId: w.userId,
+    updatedAt: now(),
+  };
   putWallet(next);
   appendAudit({
-    actorId: actor?.id ?? w.userId, actorName: actor?.name ?? 'System', actorTier: actor?.tier ?? 'user',
+    actorId: actor.id, actorName: actor.name, actorTier: actor.tier,
     action: 'wallet.settings.updated', entity: 'Wallet', entityId: w.id, severity: 'info',
     ip: clientIp(req), detail: `Wallet settings updated: ${Object.keys(patch).join(', ')}`,
   });
@@ -531,7 +645,7 @@ app.patch('/api/wallet/:id', wrap((req, res) => {
 
 /* ---------------------------- M-PESA STK (Daraja) --------------------------- */
 
-app.post('/api/wallet/topup/mpesa/stk', requireActor, requireSelfOrPrivileged, wrap(async (req, res) => {
+app.post('/api/wallet/topup/mpesa/stk', requireActor, stkRateLimit, requireSelfOrPrivileged, wrap(async (req, res) => {
   const { userId, phone, amount } = req.body ?? {};
   const s = settings();
   const msisdn = normalizeMsisdn(phone);
@@ -550,7 +664,7 @@ app.post('/api/wallet/topup/mpesa/stk', requireActor, requireSelfOrPrivileged, w
   let merchantRequestID;
   if (daraja.isLive()) {
     try {
-      const pushed = await daraja.stkPush({ msisdn, amount: value, accountRef: 'IPRS Wallet', description: 'Wallet top-up' });
+      const pushed = await daraja.stkPush({ msisdn, amount: value, accountRef: 'IPRS Wallet', description: 'Wallet top-up', callbackToken: callbackToken() });
       checkoutRequestID = pushed.CheckoutRequestID;
       merchantRequestID = pushed.MerchantRequestID;
     } catch (e) {
@@ -566,6 +680,12 @@ app.post('/api/wallet/topup/mpesa/stk', requireActor, requireSelfOrPrivileged, w
     checkoutRequestID = `ws_CO_${stamp()}_${crypto.randomInt(1000, 9999)}`;
     merchantRequestID = `29115-${crypto.randomInt(1000000, 9999999)}-${crypto.randomInt(0, 9)}`;
   }
+
+  stkPut({
+    checkoutRequestID, merchantRequestID, userId, phone: msisdn, amount: value,
+    startedAt: Date.now(), settleAfter: Date.now() + 7000 + crypto.randomInt(0, 2500),
+    cancelled: false, result: null,
+  });
 
   // Modelled handset outcome (simulation only), resolved when the client polls
   // /stk/:id or the Daraja callback route posts the result.
@@ -584,12 +704,6 @@ app.post('/api/wallet/topup/mpesa/stk', requireActor, requireSelfOrPrivileged, w
     });
   }
 
-  stkPut({
-    checkoutRequestID, merchantRequestID, userId, phone: msisdn, amount: value,
-    startedAt: Date.now(), settleAfter: Date.now() + 7000 + crypto.randomInt(0, 2500),
-    cancelled: false, result: null,
-  });
-
   appendAudit({
     actorId: userId, actorName: findUser(userId)?.name ?? 'System', actorTier: findUser(userId)?.tier ?? 'user',
     action: 'wallet.topup.initiated', entity: 'Wallet', entityId: walletFor(userId)?.id ?? null,
@@ -601,9 +715,10 @@ app.post('/api/wallet/topup/mpesa/stk', requireActor, requireSelfOrPrivileged, w
 }));
 
 /** Poll the handset outcome. Returns `pending` until the modelled settle time passes. */
-app.get('/api/wallet/topup/mpesa/stk/:checkoutRequestID', wrap((req, res) => {
+app.get('/api/wallet/topup/mpesa/stk/:checkoutRequestID', requireActor, wrap((req, res) => {
   const p = stkGet(req.params.checkoutRequestID);
   if (!p) return bad(res, 'No pending STK request found for that checkout reference.', 404);
+  if (req.actor.tier === 'user' && p.userId !== req.actor.id) return bad(res, 'You may only access your own STK request.', 403);
   if (!p.result) return res.json({ ok: true, status: 'pending', checkoutRequestID: p.checkoutRequestID });
   if (Date.now() < p.settleAfter && !p.cancelled) {
     return res.json({ ok: true, status: 'pending', checkoutRequestID: p.checkoutRequestID });
@@ -612,30 +727,50 @@ app.get('/api/wallet/topup/mpesa/stk/:checkoutRequestID', wrap((req, res) => {
 }));
 
 /** Daraja callback shape — what a real Safaricom webhook would POST. */
-app.post('/api/wallet/topup/mpesa/callback', wrap((req, res) => {
+app.post('/api/wallet/topup/mpesa/callback/:token', wrap((req, res) => {
+  const expectedToken = callbackToken();
+  const suppliedDigest = crypto.createHash('sha256').update(String(req.params.token)).digest();
+  const expectedDigest = crypto.createHash('sha256').update(expectedToken).digest();
+  if (!crypto.timingSafeEqual(suppliedDigest, expectedDigest)) return bad(res, 'Invalid callback token.', 401);
   const body = req.body?.Body?.stkCallback ?? req.body ?? {};
-  const id = body.CheckoutRequestID;
-  const p = id ? stkGet(id) : null;
+  const checked = assertRequestShape(body, [
+    'MerchantRequestID', 'CheckoutRequestID', 'ResultCode', 'ResultDesc',
+    'MpesaReceiptNumber', 'CallbackMetadata', 'PhoneNumber', 'Amount', 'TransactionDate',
+  ]);
+  if (!checked.ok) return bad(res, checked.message);
+  const callback = checked.value;
+  const id = callback.CheckoutRequestID;
+  const p = id ? stkGet(String(id)) : null;
   if (!p) return bad(res, 'Unknown checkout request.', 404);
+  const callbackAmount = Number(callback.Amount);
+  if (!Number.isFinite(callbackAmount) || callbackAmount !== Number(p.amount)) {
+    appendAudit({
+      actorId: 'system', actorName: 'Safaricom Daraja', actorTier: 'system',
+      action: 'wallet.topup.callback.amount_mismatch', entity: 'Wallet', entityId: p ? walletFor(p.userId)?.id : null,
+      severity: 'critical', ip: clientIp(req), detail: `Rejected M-PESA callback amount for checkout ${id}`,
+    });
+    return bad(res, 'Callback amount does not match the initiated checkout.', 400);
+  }
   const result = {
-    MerchantRequestID: body.MerchantRequestID ?? p.merchantRequestID,
+    MerchantRequestID: callback.MerchantRequestID ?? p.merchantRequestID,
     CheckoutRequestID: id,
-    ResultCode: Number(body.ResultCode ?? 0),
-    ResultDesc: body.ResultDesc ?? 'Accepted',
-    MpesaReceiptNumber: body.CallbackMetadata?.Item?.find?.((i) => i.Name === 'MpesaReceiptNumber')?.Value ?? body.MpesaReceiptNumber,
+    ResultCode: Number(callback.ResultCode ?? 0),
+    ResultDesc: callback.ResultDesc ?? 'Accepted',
+    MpesaReceiptNumber: callback.CallbackMetadata?.Item?.find?.((i) => i.Name === 'MpesaReceiptNumber')?.Value ?? callback.MpesaReceiptNumber,
     PhoneNumber: p.phone,
     Amount: p.amount,
   };
-  stkSetResult(id, result);
+  stkSetResult(String(id), result);
   res.json({ ok: true, result });
 }));
 
 /** Settle a dispatched STK into the wallet. */
 app.post('/api/wallet/topup/mpesa/confirm', requireActor, wrap((req, res) => {
   const id = String(req.body?.checkoutRequestID ?? '');
-  const actor = actorOf(req);
+  const actor = req.actor;
   const p = stkGet(id);
   if (!p) return bad(res, 'No pending STK request found for that checkout reference.', 404);
+  if (actor.tier === 'user' && p.userId !== actor.id) return bad(res, 'You may only confirm your own STK request.', 403);
   const result = p.result ?? {
     MerchantRequestID: p.merchantRequestID, CheckoutRequestID: id, ResultCode: 1037,
     ResultDesc: 'DS timeout — the customer could not be reached.', PhoneNumber: p.phone, Amount: p.amount,
@@ -646,14 +781,14 @@ app.post('/api/wallet/topup/mpesa/confirm', requireActor, wrap((req, res) => {
   const user = findUser(p.userId);
 
   const { transaction, payment } = applyWalletMovement({
-    userId: p.userId, amount: result.Amount ?? p.amount, direction: 'credit', kind: 'topup', channel: 'mpesa',
+    userId: p.userId, amount: p.amount, direction: 'credit', kind: 'topup', channel: 'mpesa',
     status, reference,
     description: success ? `M-PESA STK Push top-up — ${maskMsisdn(result.PhoneNumber)}` : `M-PESA STK Push failed — ${result.ResultDesc}`,
     gatewayRef: result.MpesaReceiptNumber ?? id,
     payment: {
-      channel: 'mpesa', method: `STK Push — ${maskMsisdn(result.PhoneNumber)}`, amount: result.Amount ?? p.amount,
+      channel: 'mpesa', method: `STK Push — ${maskMsisdn(result.PhoneNumber)}`, amount: p.amount,
       status, reference, gateway: 'Safaricom Daraja', gatewayRef: result.MpesaReceiptNumber, feeKes: 0,
-      netKes: success ? (result.Amount ?? p.amount) : 0, rawResponse: result,
+      netKes: success ? p.amount : 0, rawResponse: result,
       failureReason: success ? undefined : result.ResultDesc, ip: user?.lastLoginIp ?? clientIp(req),
     },
   });
@@ -664,7 +799,7 @@ app.post('/api/wallet/topup/mpesa/confirm', requireActor, wrap((req, res) => {
     action: success ? 'wallet.topup.success' : 'wallet.topup.failed', entity: 'Wallet', entityId: transaction.walletId,
     severity: success ? 'success' : 'warning', ip: clientIp(req),
     detail: success
-      ? `KES ${Number(result.Amount).toLocaleString('en-KE')} credited via M-PESA receipt ${result.MpesaReceiptNumber}`
+      ? `KES ${Number(p.amount).toLocaleString('en-KE')} credited via M-PESA receipt ${result.MpesaReceiptNumber}`
       : `M-PESA STK failed (${result.ResultCode}) — ${result.ResultDesc}`,
   });
 
@@ -672,7 +807,7 @@ app.post('/api/wallet/topup/mpesa/confirm', requireActor, wrap((req, res) => {
   res.json({
     ok: success, status: success ? 'success' : 'failed',
     message: success
-      ? `KES ${Number(result.Amount).toLocaleString('en-KE')} credited. Receipt ${result.MpesaReceiptNumber}.`
+      ? `KES ${Number(p.amount).toLocaleString('en-KE')} credited. Receipt ${result.MpesaReceiptNumber}.`
       : `${result.ResultDesc} (ResultCode ${result.ResultCode})`,
     payment, transaction, raw: result,
   });
@@ -682,6 +817,7 @@ app.post('/api/wallet/topup/mpesa/cancel', requireActor, requireSelfOrPrivileged
   const id = String(req.body?.checkoutRequestID ?? '');
   const p = stkGet(id);
   if (!p) return bad(res, 'No pending STK request found.', 404);
+  if (req.actor.tier === 'user' && p.userId !== req.actor.id) return bad(res, 'You may only cancel your own STK request.', 403);
   stkSetCancelled(id);
   stkSetResult(id, {
     MerchantRequestID: p.merchantRequestID, CheckoutRequestID: id, ResultCode: 1032,
@@ -726,21 +862,35 @@ app.post('/api/wallet/topup/card', requireActor, requireSelfOrPrivileged, wrap(a
 }));
 
 app.post('/api/wallet/topup/card/confirm', requireActor, requireSelfOrPrivileged, wrap(async (req, res) => {
-  const { userId, paymentIntentId, otp, amount, cardNumber, holder, expiry } = req.body ?? {};
+  const checked = assertRequestShape(req.body, ['userId', 'paymentIntentId', 'otp', 'amount', 'cardNumber', 'holder', 'expiry']);
+  if (!checked.ok) return bad(res, checked.message);
+  const { userId, paymentIntentId, otp, amount, cardNumber, holder, expiry } = checked.value;
+  const intentId = String(paymentIntentId ?? '');
+  const intent = stkGet(intentId);
+  if (!intent) return bad(res, 'Card payment intent not found.', 404);
+  if (!String(intent.merchantRequestID ?? '').startsWith('card_')) return bad(res, 'Payment intent is not a card top-up.', 400);
+  if (String(userId ?? '') !== intent.userId) return bad(res, 'You may only confirm your own card payment intent.', 403);
+
+  const requestedAmount = Number(amount);
+  if (!Number.isFinite(requestedAmount) || requestedAmount !== Number(intent.amount)) return bad(res, 'Card confirmation amount does not match the initiated payment.', 400);
+  const value = Number(intent.amount);
+  const currentSettings = settings();
+  const min = currentSettings.billing?.walletMinTopUpKes ?? 100;
+  const max = currentSettings.billing?.walletMaxTopUpKes ?? 200000;
+  if (value < min || value > max) return bad(res, `Card top-up must be between KES ${min.toLocaleString('en-KE')} and KES ${max.toLocaleString('en-KE')}.`);
+
   const actor = actorOf(req);
   const digits = String(cardNumber ?? '').replace(/\D/g, '');
   const brand = cardBrand(digits);
-  const value = Math.round(Number(amount));
-  if (!Number.isFinite(value) || value <= 0) return bad(res, 'Enter a valid top-up amount.', 400);
   const code = String(otp ?? '').trim();
   const declined = code === '000000' || code.length !== 6;
-  const reference = `CARD-${paymentIntentId}`;
+  const reference = `CARD-${intentId}`;
   const fee = Math.round(value * 0.029);
-  const user = findUser(userId);
+  const user = findUser(intent.userId);
   await sleep(900);
 
   const raw = {
-    intent: paymentIntentId, brand, maskedPan: maskCard(digits), holder: holder ?? '', expiry: expiry ?? '',
+    intent: intentId, brand, maskedPan: maskCard(digits), holder: holder ?? '', expiry: expiry ?? '',
     authCode: declined ? null : `AUTH${crypto.randomInt(100000, 999999)}`,
     threeDs: declined ? 'failed' : 'authenticated', declineCode: declined ? 'incorrect_otp' : null,
     processedAt: now(), acquirer: 'IPRS Acquiring (sandbox)', feeKes: fee,
@@ -748,9 +898,9 @@ app.post('/api/wallet/topup/card/confirm', requireActor, requireSelfOrPrivileged
   const status = declined ? 'failed' : 'success';
 
   const { transaction, payment } = applyWalletMovement({
-    userId, amount: value, direction: 'credit', kind: 'topup', channel: 'card', status, reference,
+    userId: intent.userId, amount: value, direction: 'credit', kind: 'topup', channel: 'card', status, reference,
     description: declined ? `Card top-up declined — ${brand} ${maskCard(digits)}` : `Card top-up — ${brand} ${maskCard(digits)}`,
-    gatewayRef: raw.authCode ?? paymentIntentId,
+    gatewayRef: raw.authCode ?? intentId,
     payment: {
       channel: 'card', method: `${brand} ${maskCard(digits)}`, amount: value, status, reference,
       gateway: 'IPRS Card Acquirer', gatewayRef: raw.authCode ?? undefined, feeKes: declined ? 0 : fee,
@@ -761,14 +911,14 @@ app.post('/api/wallet/topup/card/confirm', requireActor, requireSelfOrPrivileged
   });
 
   appendAudit({
-    actorId: actor?.id ?? userId, actorName: actor?.name ?? user?.name ?? 'System', actorTier: actor?.tier ?? user?.tier ?? 'user',
+    actorId: actor?.id ?? intent.userId, actorName: actor?.name ?? user?.name ?? 'System', actorTier: actor?.tier ?? user?.tier ?? 'user',
     action: declined ? 'wallet.topup.failed' : 'wallet.topup.success', entity: 'Wallet', entityId: transaction.walletId,
     severity: declined ? 'warning' : 'success', ip: clientIp(req),
     detail: declined
       ? `Card top-up declined for KES ${value.toLocaleString('en-KE')} (${brand} ${maskCard(digits)})`
       : `KES ${value.toLocaleString('en-KE')} credited via ${brand} ${maskCard(digits)} (fee KES ${fee.toLocaleString('en-KE')})`,
   });
-  stkDelete(String(paymentIntentId));
+  stkDelete(intentId);
 
   res.json({
     ok: !declined, status,
@@ -877,12 +1027,12 @@ app.get('/api/payment-methods', requireActor, wrap((req, res) => res.json(ownOrA
 
 /* -------------------------------- providers ------------------------------- */
 
-app.get('/api/providers', requirePerm('providers.view'), wrap((_req, res) => res.json(providers())));
+app.get('/api/providers', requirePerm('providers.view'), wrap((_req, res) => res.json(publicProviders(providers()))));
 
 app.get('/api/providers/:id', requirePerm('providers.view'), wrap((req, res) => {
   const p = providerById(req.params.id);
   if (!p) return bad(res, 'Provider not found.', 404);
-  res.json(p);
+  res.json(publicProvider(p));
 }));
 
 app.patch('/api/providers/:id', requirePerm('providers.configure'), wrap((req, res) => {
@@ -899,7 +1049,7 @@ app.patch('/api/providers/:id', requirePerm('providers.configure'), wrap((req, r
     severity: changes.includes('consumerSecret') || changes.includes('consumerKey') ? 'critical' : 'info',
     ip: clientIp(req), detail: `${current.name}: ${changes.length ? changes.join(', ') : 'no effective change'}`,
   });
-  res.json({ ok: true, provider: next, message: `${current.name} configuration saved.` });
+  res.json({ ok: true, provider: publicProvider(next), message: `${current.name} configuration saved.` });
 }));
 
 /** Multi-stage gateway handshake modelled on a real provider test. */
@@ -942,36 +1092,57 @@ app.post('/api/providers/:id/test', requirePerm('providers.test'), wrap(async (r
     ip: clientIp(req), detail: `${p.name} connectivity test ${passed ? 'passed' : 'FAILED'} in ${latency}ms`,
   });
 
-  res.json({ ok: passed, stages: results, latencyMs: latency, testedAt: next.lastTestAt, provider: next });
+  res.json({ ok: passed, stages: results, latencyMs: latency, testedAt: next.lastTestAt, provider: publicProvider(next) });
 }));
 
 app.get('/api/providers/:id/logs', requirePerm('provider.logs.view'), wrap((req, res) => {
   res.json(providerLogs(req.params.id, Math.min(Number(req.query.limit ?? 200), 1000)));
 }));
 
-app.get('/api/provider-logs', wrap((req, res) => {
+app.get('/api/provider-logs', requirePerm('provider.logs.view'), wrap((req, res) => {
   res.json(providerLogs(null, Math.min(Number(req.query.limit ?? 200), 1000)));
 }));
 
-app.get('/api/api-keys', requireActor, wrap((req, res) => res.json(ownOrAll(req, apiKeys(), ['userId']))));
+app.get('/api/api-keys', requireActor, wrap((req, res) => res.json(ownOrAll(req, apiKeys(), ['ownerId', 'userId']).map(publicApiKey))));
 
-app.post('/api/api-keys/:id/revoke', wrap((req, res) => {
-  const actor = actorOf(req);
+app.post('/api/api-keys', requirePerm('apikeys.manage'), wrap((req, res) => {
+  const checked = assertRequestShape(req.body, ['label', 'scopes', 'environment']);
+  if (!checked.ok) return bad(res, checked.message);
+  const { label, scopes, environment = 'sandbox' } = checked.value;
+  if (typeof label !== 'string' || !label.trim()) return bad(res, 'A label is required.');
+  if (!Array.isArray(scopes) || scopes.length === 0 || scopes.some((scope) => typeof scope !== 'string' || !MACHINE_SCOPES.includes(scope))) {
+    return bad(res, 'Select at least one valid machine API scope.');
+  }
+  if (environment !== 'sandbox' && environment !== 'live') return bad(res, 'environment must be sandbox or live.');
+  if (environment === 'live' && req.actor.tier === 'user') return bad(res, 'Only an Admin or Super Admin can issue live keys.', 403);
+  const issued = issueMachineApiKey({ ownerId: req.actor.id, label: label.trim(), scopes, environment });
+  putApiKey({ ...issued.key, secret: issued.secret, secretMasked: `${issued.secret.slice(0, 8)}••••` });
+  appendAudit({
+    actorId: req.actor.id, actorName: req.actor.name, actorTier: req.actor.tier,
+    action: 'apikey.created', entity: 'ApiKey', entityId: issued.key.id, severity: 'critical', ip: clientIp(req),
+    detail: `Issued ${environment} key "${issued.key.label}" with scopes ${scopes.join(', ')}`,
+  });
+  res.status(201).json({ ok: true, key: { id: issued.key.id, prefix: issued.key.prefix, label: issued.key.label, environment: issued.key.environment, scopes: issued.key.scopes }, secret: issued.secret });
+}));
+
+app.post('/api/api-keys/:id/revoke', requireActor, wrap((req, res) => {
+  const actor = req.actor;
   const key = apiKeys().find((k) => k.id === req.params.id);
   if (!key) return bad(res, 'API key not found.', 404);
-  const next = { ...key, status: 'revoked' };
+  if (actor.tier === 'user' && key.ownerId !== actor.id) return bad(res, 'You may only revoke your own API keys.', 403);
+  const next = { ...key, status: 'revoked', revokedAt: now() };
   putApiKey(next);
   appendAudit({
     actorId: actor?.id ?? 'system', actorName: actor?.name ?? 'System', actorTier: actor?.tier ?? 'admin',
     action: 'apikey.revoked', entity: 'ApiKey', entityId: key.id, severity: 'critical', ip: clientIp(req),
     detail: `Revoked API key ${key.label} (${key.prefix}…)`,
   });
-  res.json({ ok: true, key: next });
+  res.json({ ok: true, key: publicApiKey(next) });
 }));
 
 /* -------------------------------- settings -------------------------------- */
 
-app.get('/api/settings', requirePerm('settings.view'), wrap((_req, res) => res.json(settings())));
+app.get('/api/settings', requirePerm('settings.view'), wrap((_req, res) => res.json(publicSettings(settings()))));
 
 app.patch('/api/settings/:group', wrap((req, res) => {
   const actor = actorOf(req);
@@ -992,12 +1163,12 @@ app.patch('/api/settings/:group', wrap((req, res) => {
     severity: ['security', 'compliance', 'platform'].includes(group) ? 'critical' : 'info',
     ip: clientIp(req), detail: changed.length ? `${group}: ${changed.join(', ')}` : `${group}: no effective change`,
   });
-  res.json({ ok: true, settings: next, message: `${group} saved.` });
+  res.json({ ok: true, settings: publicSettings(next), message: `${group} saved.` });
 }));
 
-app.post('/api/settings/maintenance', wrap((req, res) => {
-  const actor = actorOf(req);
-  if (actor && actor.tier !== 'super_admin') {
+app.post('/api/settings/maintenance', requirePerm('maintenance.toggle'), wrap((req, res) => {
+  const actor = req.actor;
+  if (actor.tier !== 'super_admin') {
     return res.status(403).json({ ok: false, message: 'Only a Super Admin can toggle maintenance mode.' });
   }
   const current = settings();
@@ -1016,7 +1187,7 @@ app.post('/api/settings/maintenance', wrap((req, res) => {
     action: 'platform.maintenance.toggled', entity: 'SystemSettings', entityId: 'platform',
     severity: 'critical', ip: clientIp(req), detail: enabled ? 'Maintenance mode ENABLED' : 'Maintenance mode disabled',
   });
-  res.json({ ok: true, settings: next });
+  res.json({ ok: true, settings: publicSettings(next) });
 }));
 
 app.post('/api/settings/import', requirePerm('settings.edit.platform'), wrap((req, res) => {
@@ -1034,7 +1205,35 @@ app.post('/api/settings/import', requirePerm('settings.edit.platform'), wrap((re
     action: 'settings.imported', entity: 'SystemSettings', severity: 'critical', ip: clientIp(req),
     detail: `Imported configuration for ${Object.keys(incoming).join(', ')}`,
   });
-  res.json({ ok: true, settings: next });
+  res.json({ ok: true, settings: publicSettings(next) });
+}));
+
+app.get('/api/admin/backup', requireActor, wrap((req, res) => {
+  if (req.actor.tier !== 'super_admin') return bad(res, 'Only a Super Admin can export a backup.', 403);
+  const backup = createBackup();
+  appendAudit({
+    actorId: req.actor.id, actorName: req.actor.name, actorTier: req.actor.tier,
+    action: 'backup.exported', entity: 'SystemBackup', severity: 'critical', ip: clientIp(req),
+    detail: 'Exported versioned backup without sessions, in-flight STK intents, or credentials',
+  });
+  res.json(backup);
+}));
+
+app.post('/api/admin/restore', requireActor, wrap((req, res) => {
+  if (req.actor.tier !== 'super_admin') return bad(res, 'Only a Super Admin can restore a backup.', 403);
+  const payload = req.body?.backup ?? req.body;
+  try {
+    validateBackup(payload);
+  } catch (error) {
+    return bad(res, error?.message ?? 'Invalid backup payload.');
+  }
+  const result = restoreBackup(payload);
+  appendAudit({
+    actorId: req.actor.id, actorName: req.actor.name, actorTier: req.actor.tier,
+    action: 'backup.restored', entity: 'SystemBackup', severity: 'critical', ip: clientIp(req),
+    detail: 'Restored versioned backup transactionally while preserving auth and callback secrets',
+  });
+  res.json({ ok: true, ...result, message: 'Backup restored.' });
 }));
 
 /* --------------------------------- pricing -------------------------------- */
@@ -1123,11 +1322,19 @@ app.delete('/api/sessions/:id', requirePerm('sessions.revoke'), wrap((req, res) 
 app.get('/api/usage', requireActor, wrap((req, res) => res.json(ownOrAll(req, usageRecords(Math.min(Number(req.query.limit ?? 500), 5000)), ['userId']))));
 
 app.post('/api/usage', requireActor, wrap((req, res) => {
-  const u = req.body ?? {};
+  const checked = assertRequestShape(req.body, [
+    'userId', 'userName', 'providerId', 'providerName', 'checkType', 'costKes', 'status', 'latencyMs', 'subjectRef',
+  ]);
+  if (!checked.ok) return bad(res, checked.message);
+  const u = checked.value;
+  if (req.actor.tier === 'user' && u.userId !== undefined && String(u.userId) !== req.actor.id) {
+    return bad(res, 'You may only record usage for your own account.', 403);
+  }
+  const userId = req.actor.tier === 'user' ? req.actor.id : u.userId ?? 'system';
   const record = {
-    id: uid('use'), at: now(), userId: u.userId ?? 'system', userName: u.userName ?? 'System',
+    id: uid('use'), at: now(), userId, userName: req.actor.tier === 'user' ? req.actor.name : u.userName ?? 'System',
     providerId: u.providerId ?? '', providerName: u.providerName ?? '', checkType: u.checkType ?? '',
-    costKes: Number(u.costKes ?? 0), status: u.status ?? 'success', latencyMs: Number(u.latencyMs ?? 0),
+    costKes: nonNegativeNumber(u.costKes), status: u.status ?? 'success', latencyMs: nonNegativeNumber(u.latencyMs),
     subjectRef: u.subjectRef ?? '',
   };
   putUsage(record);
@@ -1140,6 +1347,14 @@ app.get('/api/cases', requireActor, wrap((req, res) => res.json(ownOrAll(req, ca
 app.get('/api/invoices', requirePerm('billing.view'), wrap((_req, res) => res.json(invoices())));
 app.get('/api/notifications', requireActor, wrap((req, res) => res.json(ownOrAll(req, notifications(), ['userId']))));
 app.get('/api/activities', requireActor, wrap((req, res) => res.json(ownOrAll(req, activities(), ['userId', 'actorId']))));
+app.use('/api/v1', createMachineApiRouter({
+  ...machineDependencies(applyWalletMovement),
+  rateLimit: apiV1RateLimit,
+  sessionAuthenticate: (req) => {
+    const actor = actorOf(req);
+    return actor && effectivePermissions(actor).has('search.run') ? actor : null;
+  },
+}));
 
 /* ---------------------------------- meta ---------------------------------- */
 
@@ -1153,7 +1368,7 @@ app.get('/api', wrap((_req, res) => {
       'GET  /api/wallet', 'GET  /api/wallet/transactions', 'PATCH /api/wallet/:id',
       'POST /api/wallet/topup/mpesa/stk', 'GET  /api/wallet/topup/mpesa/stk/:checkoutRequestID',
       'POST /api/wallet/topup/mpesa/confirm', 'POST /api/wallet/topup/mpesa/cancel',
-      'POST /api/wallet/topup/mpesa/callback',
+      'POST /api/wallet/topup/mpesa/callback/:token',
       'POST /api/wallet/topup/card', 'POST /api/wallet/topup/card/confirm',
       'GET  /api/payments', 'GET  /api/payments/stats', 'GET  /api/payments/:id',
       'POST /api/payments/:id/refund', 'POST /api/payments/:id/retry', 'GET  /api/payment-methods',
@@ -1164,8 +1379,12 @@ app.get('/api', wrap((_req, res) => {
       'POST /api/settings/import',
       'GET  /api/pricing', 'PATCH /api/pricing',
       'GET  /api/audit', 'GET  /api/sessions', 'DELETE /api/sessions/:id',
+      'GET  /api/auth/sessions', 'DELETE /api/auth/sessions/:id', 'POST /api/auth/sessions/revoke-others',
+      'GET  /api/spin/modules',
+      'GET  /api/admin/backup', 'POST /api/admin/restore',
       'GET  /api/usage', 'POST /api/usage',
       'GET  /api/cases', 'GET  /api/invoices', 'GET  /api/notifications', 'GET  /api/activities',
+      'GET  /api/v1', 'GET  /api/v1/pricing', 'GET  /api/v1/wallet', 'POST /api/v1/verify',
     ],
   });
 }));

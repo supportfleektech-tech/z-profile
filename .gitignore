@@ -30,3 +30,6 @@ server/.data/
 
 # Smoke-test artifacts
 .smoke-artifacts/
+
+# Isolated implementation worktrees
+.worktrees/

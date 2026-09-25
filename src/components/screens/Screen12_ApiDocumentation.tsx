@@ -4,11 +4,19 @@ import { useAppData } from '../../context/AppDataContext';
 import { Badge, Button, Callout, EmptyState, Modal, Panel, ResponsiveTable, TextInput, Field, type Column } from '../ui';
 import { formatDate, timeAgo } from '../../lib/format';
 import { TIER_META } from '../../auth/permissions';
-import type { ApiKeyRecord } from '../../types';
+import type { ApiKeyRecord, MachineApiScope } from '../../types';
+import { backendOrigin } from '../../services/http';
 
-type Tab = 'Overview' | 'Authentication' | 'Endpoints' | 'Keys' | 'Examples';
+type Tab = 'Overview' | 'Authentication' | 'Machine API' | 'Endpoints' | 'Keys' | 'Examples';
 
-const SCOPES = ['verify:read', 'report:read', 'wallet:debit', 'providers:read', 'admin:users'];
+const SCOPES: MachineApiScope[] = ['pricing:read', 'wallet:read', 'verify:run', 'verify:read', 'report:read', 'wallet:debit'];
+
+const MACHINE_ENDPOINTS_UI = [
+  { method: 'GET' as const, path: '/api/v1', scope: 'public', desc: 'Discover the machine service and its available scopes' },
+  { method: 'GET' as const, path: '/api/v1/pricing', scope: 'pricing:read', desc: 'Read the confirmed 34-item catalogue' },
+  { method: 'GET' as const, path: '/api/v1/wallet', scope: 'wallet:read', desc: 'Read only the key owner wallet' },
+  { method: 'POST' as const, path: '/api/v1/verify', scope: 'verify:run + wallet:debit', desc: 'Run a consented verification at the catalogue rate' },
+];
 
 /**
  * The endpoints the REAL scaffold backend serves (`server/index.mjs`).
@@ -39,7 +47,7 @@ const ENDPOINTS: { group: string; method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; p
   { group: 'M-PESA', method: 'GET', path: '/api/wallet/topup/mpesa/stk/:id', desc: 'Poll the handset outcome (pending | settled)' },
   { group: 'M-PESA', method: 'POST', path: '/api/wallet/topup/mpesa/confirm', desc: 'Settle a dispatched STK into the wallet' },
   { group: 'M-PESA', method: 'POST', path: '/api/wallet/topup/mpesa/cancel', desc: 'Customer pressed cancel on the handset' },
-  { group: 'M-PESA', method: 'POST', path: '/api/wallet/topup/mpesa/callback', desc: 'Daraja webhook shape (stkCallback)', guard: 'webhook' },
+  { group: 'M-PESA', method: 'POST', path: '/api/wallet/topup/mpesa/callback/:token', desc: 'Tokenized Daraja webhook; validates the initiated amount before settlement', guard: 'webhook' },
 
   { group: 'Card', method: 'POST', path: '/api/wallet/topup/card', desc: 'Create a payment intent (Luhn + expiry validated)' },
   { group: 'Card', method: 'POST', path: '/api/wallet/topup/card/confirm', desc: '3-D Secure confirm; OTP 000000 always declines' },
@@ -70,7 +78,7 @@ const methodTone = (m: string): 'success' | 'info' | 'warning' | 'danger' =>
   m === 'GET' ? 'info' : m === 'POST' ? 'success' : m === 'PATCH' ? 'warning' : 'danger';
 
 export const Screen12_ApiDocumentation: React.FC = () => {
-  const { pushToast, apiMode, apiKeys, createApiKey, revokeApiKey, can, currentUser, settings } = useAppData();
+  const { pushToast, apiMode, apiKeys, createMachineApiKey, revokeMachineApiKey, can, currentUser, settings } = useAppData();
   const [tab, setTab] = useState<Tab>('Overview');
   const [copied, setCopied] = useState<string | null>(null);
   const [group, setGroup] = useState('All');
@@ -84,8 +92,9 @@ export const Screen12_ApiDocumentation: React.FC = () => {
     return `${mine?.limit ?? settings.platform.apiRateLimitPerMin[0]?.limit ?? 120}/min`;
   }, [settings.platform.apiRateLimitPerMin, currentUser?.tier]);
 
-  const origin = typeof window === 'undefined' ? '' : window.location.origin;
-  const baseUrl = apiMode === 'api' ? `${origin}/api` : 'https://api.iprs.co.ke/v1';
+  const origin = backendOrigin();
+  const baseUrl = `${origin}/api`;
+  const machineBaseUrl = `${origin}/api/v1`;
 
   const copy = async (text: string, id: string) => {
     try {
@@ -96,6 +105,17 @@ export const Screen12_ApiDocumentation: React.FC = () => {
     setCopied(id);
     setTimeout(() => setCopied(null), 1500);
     pushToast({ title: 'Copied to clipboard', description: text.slice(0, 64), type: 'success' });
+  };
+
+  const copySecret = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard?.writeText(text);
+    } catch {
+      return;
+    }
+    setCopied(id);
+    setTimeout(() => setCopied(null), 1500);
+    pushToast({ title: 'Secret copied', description: 'The one-time API secret was copied to the clipboard.', type: 'success' });
   };
 
   const groups = useMemo(() => ['All', ...[...new Set(ENDPOINTS.map((e) => e.group))]], []);
@@ -109,7 +129,7 @@ export const Screen12_ApiDocumentation: React.FC = () => {
       render: (k) => (
         <div className="min-w-0">
           <div className="text-[11px] font-semibold text-white truncate">{k.label}</div>
-          <div className="text-[10px] text-slate-500 font-mono truncate">{k.prefix}… {k.secretMasked}</div>
+          <div className="text-[10px] text-slate-500 font-mono truncate">{k.prefix}… {k.secretMasked ?? '••••••••'}</div>
         </div>
       ),
       sortValue: (k) => k.label,
@@ -141,8 +161,7 @@ export const Screen12_ApiDocumentation: React.FC = () => {
           disabled={k.status === 'revoked' || !can('apikeys.manage')}
           icon={<Trash2 size={11} />}
           onClick={() => {
-            const r = revokeApiKey(k.id);
-            pushToast({ title: r.ok ? 'Key revoked' : 'Cannot revoke', description: r.message ?? k.label, type: r.ok ? 'success' : 'error' });
+            void revokeMachineApiKey(k.id);
           }}
         >
           <span className="hidden sm:inline">Revoke</span>
@@ -151,8 +170,8 @@ export const Screen12_ApiDocumentation: React.FC = () => {
     },
   ];
 
-  const issue = () => {
-    const r = createApiKey({ label: form.label, scopes: form.scopes, environment: form.environment });
+  const issue = async () => {
+    const r = await createMachineApiKey({ label: form.label, scopes: form.scopes, environment: form.environment });
     if (!r.ok) {
       pushToast({ title: 'Cannot issue key', description: r.message ?? 'Rejected', type: 'error' });
       return;
@@ -190,7 +209,7 @@ export const Screen12_ApiDocumentation: React.FC = () => {
       </div>
 
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-        {(['Overview', 'Authentication', 'Endpoints', 'Keys', 'Examples'] as Tab[]).map((t) => (
+        {(['Overview', 'Authentication', 'Machine API', 'Endpoints', 'Keys', 'Examples'] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -310,6 +329,56 @@ export const Screen12_ApiDocumentation: React.FC = () => {
         </div>
       )}
 
+      {tab === 'Machine API' && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Panel title="Machine API contract" icon={<Terminal size={14} className="text-cyan-400" />} className="lg:col-span-2">
+            <div className="space-y-1.5">
+              {MACHINE_ENDPOINTS_UI.map((e) => (
+                <div key={`${e.method}-${e.path}`} className="flex flex-wrap sm:flex-nowrap items-center gap-2 rounded-lg border border-sky-950 bg-[#050b14] px-2.5 py-2">
+                  <Badge tone={methodTone(e.method)}>{e.method}</Badge>
+                  <button onClick={() => copy(`${e.method} ${machineBaseUrl}${e.path.replace('/api/v1', '')}`, e.path)} className="font-mono text-[10px] sm:text-[11px] text-cyan-300 hover:underline truncate text-left min-w-0 flex-1">
+                    {e.path}
+                  </button>
+                  <Badge tone={e.scope === 'public' ? 'success' : 'accent'}>{e.scope}</Badge>
+                  <span className="text-[10px] text-slate-500 w-full sm:w-auto sm:max-w-[42%] sm:text-right truncate">{e.desc}</span>
+                </div>
+              ))}
+            </div>
+            <Callout tone="info" title="Bearer machine credentials" icon={<Key size={13} />} className="mt-3">
+              Send the issued secret as <code className="font-mono">Authorization: Bearer &lt;secret&gt;</code>. The public key id is parsed from the credential, the server compares only its SHA-256 digest, and wallet reads are always resolved from the key owner.
+            </Callout>
+          </Panel>
+          <Panel title="Verification request" icon={<Code2 size={14} className="text-emerald-400" />}>
+            <pre className="bg-[#050b14] p-3 rounded-lg border border-sky-900/60 text-[10px] text-slate-300 overflow-x-auto font-mono leading-relaxed whitespace-pre">{`curl -X POST ${machineBaseUrl}/verify \\
+  -H "Authorization: Bearer $MACHINE_API_SECRET" \\
+  -H "Content-Type: application/json" \\
+  -d '{"search_type":"identity","identifier":"23456789","consent":true}'`}</pre>
+          </Panel>
+          <Panel title="Spin response envelopes" icon={<Code2 size={14} className="text-cyan-400" />} className="lg:col-span-2">
+            <div className="grid gap-2 md:grid-cols-2">
+              <pre className="overflow-x-auto rounded-lg border border-sky-900/60 bg-[#050b14] p-3 font-mono text-[10px] leading-relaxed text-slate-300">{`{ "code": "200.001", "data": { ... } }`}</pre>
+              <pre className="overflow-x-auto rounded-lg border border-sky-900/60 bg-[#050b14] p-3 font-mono text-[10px] leading-relaxed text-slate-300">{`{ "response_code": "200", "success": true, "message": "Match found", "data": { ... } }`}</pre>
+            </div>
+            <p className="mt-2 text-[10px] text-slate-500">Both documented envelopes normalize to the same provider result. Failed provider responses return an error and are never presented as a successful dossier.</p>
+          </Panel>
+          <Panel title="Error contracts" icon={<AlertTriangle size={14} className="text-rose-400" />}>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {[
+                ['401', 'Missing, revoked, or invalid key'],
+                ['403', 'Required machine scope is absent'],
+                ['402', 'Wallet is short; body includes requiredKes'],
+                ['429', 'Rate limit exceeded; retry after the published window'],
+              ].map(([code, detail]) => (
+                <div key={code} className="rounded-lg border border-sky-900/50 bg-[#061020] p-2.5">
+                  <div className="font-mono text-sm font-black text-rose-300">{code}</div>
+                  <p className="mt-1 text-[10px] text-slate-500">{detail}</p>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        </div>
+      )}
+
       {/* -------------------------------- ENDPOINTS ------------------------------- */}
       {tab === 'Endpoints' && (
         <Panel
@@ -365,10 +434,10 @@ export const Screen12_ApiDocumentation: React.FC = () => {
           }
         >
           {issuedSecret && (
-            <Callout tone="success" title="Secret shown once" icon={<Key size={13} />} className="mb-3">
+            <Callout tone="success" title="Secret shown once" icon={<Key size={13} />} className="mb-3" data-testid="machine-secret-callout">
               <div className="font-mono text-[11px] break-all text-emerald-300">{issuedSecret}</div>
               <div className="mt-1.5 flex gap-2">
-                <Button size="xs" variant="secondary" icon={<Copy size={11} />} onClick={() => copy(issuedSecret, 'secret')}>Copy secret</Button>
+                <Button size="xs" variant="secondary" icon={<Copy size={11} />} onClick={() => void copySecret(issuedSecret, 'secret')}>Copy secret</Button>
                 <Button size="xs" variant="ghost" onClick={() => setIssuedSecret(null)}>Dismiss</Button>
               </div>
             </Callout>
@@ -403,7 +472,7 @@ export const Screen12_ApiDocumentation: React.FC = () => {
               Poll <code className="font-mono text-cyan-300">GET /api/wallet/topup/mpesa/stk/:id</code> until it returns{' '}
               <code className="font-mono">settled</code>, then POST <code className="font-mono text-cyan-300">/confirm</code> to
               credit the wallet. In production Daraja posts the same shape to{' '}
-              <code className="font-mono text-cyan-300">/callback</code>.
+              <code className="font-mono text-cyan-300">/callback/:token</code>. The token and initiated amount are both validated before settlement.
             </p>
           </Panel>
 

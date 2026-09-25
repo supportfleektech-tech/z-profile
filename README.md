@@ -3,13 +3,13 @@
 A three-tier identity-intelligence demo: verification searches across mock Kenyan data
 providers, dossiers with full provenance, wallet + M-PESA/card payments, provider
 management, system settings, audit — with User / Admin / Super Admin tiers getting
-genuinely different dashboards, tools and access. React 19 + Vite 7 + Tailwind 4,
+genuinely different dashboards, tools and access. React 19 + Vite 6 + Tailwind 4,
 built to a **single self-contained HTML file**, backed by an optional Express +
 `node:sqlite` API the frontend transparently falls back from when it's down.
 
 > Demo-grade by design: seeded data, a simulated M-PESA gateway by default. The
 > permission engine, signed-session auth, scrypt-hashed passwords, payment state machine
-> and 270-assertion test gate are real.
+> and 85-unit-test plus 318-smoke-assertion gate are real.
 
 ## Security model
 
@@ -24,6 +24,18 @@ built to a **single self-contained HTML file**, backed by an optional Express +
   nor the hash is ever returned by the API.
 - **Server-side RBAC** — every privileged route is guarded by the same
   `effectivePermissions()` engine the UI uses; a hand-rolled request gets `401`/`403`.
+- **Scoped machine API** — server-issued API keys are returned once, stored only by
+  SHA-256 digest, and enforced against the six documented scopes. Verification requests
+  require explicit consent, debit the owner wallet at the catalogue rate, record usage and
+  audit, and refund provider failures.
+- **Webhook settlement** — Daraja callbacks use `/api/wallet/topup/mpesa/callback/:token`;
+  the token and initiated amount are checked before credit, and mismatches are audited as
+  critical events.
+- **Write-only secrets** — provider and settings responses omit stored credentials; Super Admins may rotate them, but no read API returns them.
+- **Truthful fallback** — backend authorization failures stay failed API calls, while local simulations are visibly marked `SIMULATED VERIFICATION` in profiles, print, and PDF output.
+- **Operational controls** — forward-only SQLite migrations, Super-Admin versioned backup
+  export/restore, self-service session revocation, fixed-window rate-limit headers, and
+  pinned CORS/security headers are covered by the smoke gate.
 - Known demo shortcuts, honestly: the browser-mock adapter compares passwords
   client-side (it has no server to hash against), and there is no TLS story. Fix both
   (plus real session infra) before any production use.
@@ -33,7 +45,10 @@ built to a **single self-contained HTML file**, backed by an optional Express +
 The wallet's STK simulation is replaced by the live Daraja API when these are set:
 
 ```bash
-DARAJA_CONSUMER_KEY=… DARAJA_CONSUMER_SECRET=… DARAJA_SHORTCODE=…   DARAJA_PASSKEY=… DARAJA_ENV=sandbox   DARAJA_CALLBACK_URL=https://your-host/api/wallet/topup/mpesa/callback npm run server
+export DARAJA_CALLBACK_TOKEN='<deployment-secret>'
+export DARAJA_CALLBACK_URL="https://your-host/api/wallet/topup/mpesa/callback/$DARAJA_CALLBACK_TOKEN"
+DARAJA_CONSUMER_KEY=… DARAJA_CONSUMER_SECRET=… DARAJA_SHORTCODE=… \
+  DARAJA_PASSKEY=… DARAJA_ENV=sandbox npm run server
 ```
 
 `GET /api/health` reports `gateway: { mode, env, missing }`. In live mode a failed
@@ -62,9 +77,29 @@ Production single-file bundle: `npm run build` → `dist/index.html`.
 ## Verify
 
 ```bash
-npm run verify     # typecheck + build + 270 assertions:
-                   #   API 77 · DOM 44 · write-flows 64 · requirement-traceability 85
+npm run verify     # typecheck + lint + 85 unit tests + build + 318 smoke assertions:
+                   #   API 114 · DOM 44 · write-flows 64 · requirement-traceability 96
 ```
+
+## Machine API quick start
+
+Issue a sandbox key from **API documentation → Keys** with least-privilege scopes, then use
+its one-time secret as a bearer credential:
+
+```bash
+curl -sS "$BACKEND/api/v1/pricing" \\
+  -H "Authorization: Bearer $MACHINE_API_SECRET"
+
+curl -sS -X POST "$BACKEND/api/v1/verify" \\
+  -H "Authorization: Bearer $MACHINE_API_SECRET" \\
+  -H "Content-Type: application/json" \\
+  -d '{"search_type":"identity","identifier":"23456789","consent":true}'
+```
+
+A missing key returns `401`, a missing scope returns `403`, an insufficient owner wallet
+returns `402` with `requiredKes`, and the fixed-window limiter returns `429` with
+`RateLimit-*` and `Retry-After` headers. The API documentation UI is server-first; local
+issuance is only the unavailable-backend fallback.
 
 `scripts/smoke-requirements.mjs` maps every acceptance criterion from the original
 brief (distinct profile tabs, Summary ≠ Full Report, settings that persist, provider
@@ -74,7 +109,7 @@ suite can perform.
 
 ## Spin Mobile (Kenya) integration
 
-All 21 documented Kenya modules from docs.spinmobile.co are transcribed into
+All 24 documented Kenya modules from docs.spinmobile.co are transcribed into
 `src/data/spinModules.ts`: the SuperCrunch auth contract (`POST /analytics/auth/`,
 consumer key + secret → ~10-minute bearer token), each module's `search_type`, endpoint,
 request/response parameters, and the priced item it delivers. The New Search catalogue

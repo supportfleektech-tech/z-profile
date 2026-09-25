@@ -7,6 +7,7 @@ import { useAppData } from '../../context/AppDataContext';
 import { Badge, Button, Callout, EmptyState, Panel, ProgressBar, ResponsiveTable, SegmentedControl } from '../ui';
 import { buildFullReportPdf, buildSummaryPdf } from '../../lib/reports';
 import { downloadBlob, downloadText, formatDate, KES, maskPii, toCsv } from '../../lib/format';
+import { averageReportConfidence, hasReportSection, reportAmount, reportBoolean, reportConfidence, reportCount, reportLatency, reportPercent, reportScore, reportStatus, riskScoreAvailable } from '../../lib/report-values';
 import type { DossierSection, ExtractedField, VerificationState } from '../../types';
 
 type View = 'Summary' | 'Full Report';
@@ -65,6 +66,13 @@ const FieldRow: React.FC<{ f: ExtractedField; masked: boolean; mask: (v: string)
  */
 export const Screen5_DetailedReport: React.FC = () => {
   const { activeDossier: d, settings, can, pushToast, currentUser } = useAppData();
+  const taxAvailable = hasReportSection(d, ['kra']);
+  const mpesaAvailable = hasReportSection(d, ['mpesa']);
+  const creditAvailable = hasReportSection(d, ['crb', 'credit']);
+  const employerAvailable = hasReportSection(d, ['employer']);
+  const utilityAvailable = hasReportSection(d, ['kplc', 'utility']);
+  const screeningAvailable = hasReportSection(d, ['screening', 'pep', 'sanction', 'criminal']);
+  const riskAvailable = riskScoreAvailable(d);
   const [view, setView] = useState<View>('Summary');
   const [masked, setMasked] = useState(true);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
@@ -74,7 +82,7 @@ export const Screen5_DetailedReport: React.FC = () => {
 
   const totalCost = d.sections.reduce((a, s) => a + s.costKes, 0);
   const totalFields = d.sections.reduce((a, s) => a + s.fields.length, 0);
-  const avgConfidence = Math.round(d.sections.reduce((a, s) => a + s.confidence, 0) / Math.max(1, d.sections.length));
+  const avgConfidence = averageReportConfidence(d);
   const verifiedCount = d.sections.filter((s) => s.state === 'verified').length;
 
   const keyFindings = useMemo(() => {
@@ -84,13 +92,17 @@ export const Screen5_DetailedReport: React.FC = () => {
     if (d.screening.sanctions) out.push({ level: 'danger', text: `Sanctions / watchlist match — ${d.screening.sanctionsDetail}` });
     d.screening.criminalRecords.forEach((c) => out.push({ level: 'warning', text: `Criminal record ${c.caseNo} (${c.court}) — ${c.charge}; outcome: ${c.outcome}` }));
     d.credit.adverseListings.forEach((a) => out.push({ level: 'danger', text: `Adverse listing: ${a.institution} — ${a.type}, ${KES(a.amountKes, { decimals: false })}` }));
-    if (d.tax.outstandingKes > 0) out.push({ level: 'warning', text: `Outstanding KRA liability of ${KES(d.tax.outstandingKes, { decimals: false })}.` });
-    if (!d.tax.goodStanding) out.push({ level: 'warning', text: 'KRA tax compliance certificate is not in good standing.' });
-    if (d.utility.arrearsKes > 0) out.push({ level: 'warning', text: `Utility arrears of ${KES(d.utility.arrearsKes, { decimals: false })} at ${d.utility.provider}.` });
-    if (d.credit.utilisationPct > 80) out.push({ level: 'warning', text: `Credit utilisation is high at ${d.credit.utilisationPct}%.` });
-    if (d.mobileMoney.simSwapEvents > 0) out.push({ level: 'warning', text: `${d.mobileMoney.simSwapEvents} SIM swap event(s) on the M-PESA line.` });
+    if (d.tax.outstandingKes !== null && d.tax.outstandingKes > 0) out.push({ level: 'warning', text: `Outstanding KRA liability of ${KES(d.tax.outstandingKes, { decimals: false })}.` });
+    if (d.tax.goodStanding === false) out.push({ level: 'warning', text: 'KRA tax compliance certificate is not in good standing.' });
+    if (d.utility.arrearsKes !== null && d.utility.arrearsKes > 0) out.push({ level: 'warning', text: `Utility arrears of ${KES(d.utility.arrearsKes, { decimals: false })} at ${d.utility.provider}.` });
+    if (d.credit.utilisationPct !== null && d.credit.utilisationPct > 80) out.push({ level: 'warning', text: `Credit utilisation is high at ${d.credit.utilisationPct}%.` });
+    if (d.mobileMoney.simSwapEvents !== null && d.mobileMoney.simSwapEvents > 0) out.push({ level: 'warning', text: `${d.mobileMoney.simSwapEvents} SIM swap event(s) on the M-PESA line.` });
     d.documents.filter((x) => x.status === 'Expired').forEach((x) => out.push({ level: 'warning', text: `${x.type} expired on ${x.expiresOn ?? 'unknown date'}.` }));
-    if (out.length === 0) out.push({ level: 'success', text: 'No adverse findings across any queried source.' });
+    if (out.length === 0) {
+      if (!screeningAvailable) out.push({ level: 'warning', text: 'Screening data unavailable.' });
+      else if (d.screening.pep === null && d.screening.sanctions === null) out.push({ level: 'warning', text: 'Screening provider did not return conclusive PEP or sanctions values.' });
+      else out.push({ level: 'success', text: 'No adverse findings were reported by the queried providers.' });
+    }
     return out;
   }, [d]);
 
@@ -147,6 +159,11 @@ export const Screen5_DetailedReport: React.FC = () => {
 
   return (
     <div className="w-full text-xs text-slate-200">
+      {d.dataMode === 'simulated' && (
+        <Callout tone="warning" title="SIMULATED VERIFICATION">
+          This report uses seeded demo data and does not represent a live registry response.
+        </Callout>
+      )}
       {/* -------- toolbar -------- */}
       <div className="sticky top-0 z-20 bg-[#071120]/97 backdrop-blur border-b border-sky-900/50 px-2 sm:px-4 py-2.5 flex flex-col lg:flex-row lg:items-center gap-2.5 no-print">
         <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -212,11 +229,11 @@ export const Screen5_DetailedReport: React.FC = () => {
                   {[
                     ['National ID', masked ? mask(d.subject.idNumber) : d.subject.idNumber],
                     ['Date of birth', `${d.subject.dob} (${d.subject.gender})`],
-                    ['KRA PIN', masked ? mask(d.subject.kraPin) : d.subject.kraPin],
-                    ['Phone', masked ? mask(d.subject.phone) : d.subject.phone],
-                    ['County', `${d.subject.county} · ${d.subject.subCounty}`],
-                    ['Employer', d.employment.find((e) => e.current)?.company ?? '—'],
-                    ['M-PESA name', masked ? mask(d.mobileMoney.accountName) : d.mobileMoney.accountName],
+                     ['KRA PIN', taxAvailable && d.subject.kraPin ? (masked ? mask(d.subject.kraPin) : d.subject.kraPin) : 'Unavailable'],
+                     ['Phone', masked ? mask(d.subject.phone) : d.subject.phone],
+                     ['County', `${d.subject.county} · ${d.subject.subCounty}`],
+                     ['Employer', employerAvailable ? (d.employment.find((e) => e.current)?.company ?? 'Unavailable') : 'Unavailable'],
+                     ['M-PESA name', mpesaAvailable && d.mobileMoney.accountName ? (masked ? mask(d.mobileMoney.accountName) : d.mobileMoney.accountName) : 'Unavailable'],
                   ].map(([k, v]) => (
                     <div key={k} className="flex items-baseline justify-between gap-2 border-b border-sky-950/60 pb-1.5 last:border-0">
                       <span className="text-slate-500 shrink-0">{k}</span>
@@ -229,10 +246,10 @@ export const Screen5_DetailedReport: React.FC = () => {
               <Panel title="Risk verdict" icon={<ShieldCheck size={14} className="text-cyan-400" />}>
                 <div className="flex items-center gap-3">
                   <div className={`w-14 h-14 rounded-xl flex flex-col items-center justify-center border ${
-                    d.risk.band === 'Low' ? 'bg-emerald-950/50 border-emerald-800/50' : d.risk.band === 'Medium' ? 'bg-amber-950/50 border-amber-800/50' : 'bg-rose-950/50 border-rose-800/50'
+                    d.risk.band === 'Low' ? 'bg-emerald-950/50 border-emerald-800/50' : d.risk.band === 'Medium' ? 'bg-amber-950/50 border-amber-800/50' : d.risk.band === 'High' ? 'bg-rose-950/50 border-rose-800/50' : 'bg-slate-950/50 border-slate-700/50'
                   }`}>
-                    <span className="text-lg font-black text-white">{d.risk.score}</span>
-                    <span className="text-[8px] uppercase text-slate-400">{d.risk.band}</span>
+                     <span className="text-lg font-black text-white">{riskAvailable ? d.risk.score : 'Unavailable'}</span>
+                     <span className="text-[8px] uppercase text-slate-400">{riskAvailable ? d.risk.band : 'Unknown'}</span>
                   </div>
                   <div className="min-w-0">
                     <p className="text-[11px] text-slate-300 leading-snug">{d.risk.verdict}</p>
@@ -253,7 +270,7 @@ export const Screen5_DetailedReport: React.FC = () => {
                 <div className="mt-3 grid grid-cols-3 gap-2 text-center">
                   {[
                     ['Sections', `${verifiedCount}/${d.sections.length}`],
-                    ['Confidence', `${avgConfidence}%`],
+                     ['Confidence', reportConfidence(avgConfidence)],
                     ['Cost', KES(totalCost, { decimals: false })],
                   ].map(([k, v]) => (
                     <div key={k} className="rounded-lg bg-[#061020] border border-sky-900/50 py-1.5">
@@ -281,12 +298,12 @@ export const Screen5_DetailedReport: React.FC = () => {
             <Panel title="Financial snapshot" icon={<Landmark size={14} className="text-emerald-400" />}>
               <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
                 {[
-                  ['Credit score', `${d.credit.score}`, d.credit.scoreBand],
-                  ['Outstanding credit', KES(d.credit.totalOutstandingKes, { decimals: false }), `${d.credit.totalFacilities} facilities`],
-                  ['Utilisation', `${d.credit.utilisationPct}%`, `${d.credit.enquiries12m} enquiries/12m`],
-                  ['KRA outstanding', KES(d.tax.outstandingKes, { decimals: false }), d.tax.goodStanding ? 'good standing' : 'not compliant'],
-                  ['M-PESA turnover', KES(d.mobileMoney.avgMonthlyTurnoverKes, { decimals: false }), d.mobileMoney.activityBand],
-                  ['Utility bill', KES(d.utility.avgMonthlyBillKes, { decimals: false }), d.utility.paymentBehaviour],
+                   ['Credit score', reportScore(d.credit.score, creditAvailable, 900), reportStatus(d.credit.scoreBand, creditAvailable)],
+                   ['Outstanding credit', reportAmount(d.credit.totalOutstandingKes, creditAvailable), `${reportCount(d.credit.totalFacilities, creditAvailable)} facilities`],
+                   ['Utilisation', reportPercent(d.credit.utilisationPct, creditAvailable), `${reportCount(d.credit.enquiries12m, creditAvailable)} enquiries/12m`],
+                   ['KRA outstanding', reportAmount(d.tax.outstandingKes, taxAvailable), reportBoolean(d.tax.goodStanding, taxAvailable)],
+                   ['M-PESA turnover', reportAmount(d.mobileMoney.avgMonthlyTurnoverKes, mpesaAvailable), reportStatus(d.mobileMoney.activityBand, mpesaAvailable)],
+                   ['Utility bill', reportAmount(d.utility.avgMonthlyBillKes, utilityAvailable), reportStatus(d.utility.paymentBehaviour, utilityAvailable)],
                 ].map(([k, v, s]) => (
                   <div key={k} className="rounded-lg bg-[#061020] border border-sky-900/50 px-2.5 py-2">
                     <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold truncate">{k}</div>
@@ -312,7 +329,7 @@ export const Screen5_DetailedReport: React.FC = () => {
                     </div>
                     <div className="mt-1 flex items-center gap-2 text-[9px] text-slate-500">
                       <span className="truncate">{s.provider}</span>
-                      <span className="ml-auto font-mono shrink-0">{s.fields.length} fields · {s.latencyMs}ms</span>
+                       <span className="ml-auto font-mono shrink-0">{s.fields.length} fields · {reportLatency(s.latencyMs)}</span>
                     </div>
                   </button>
                 ))}
@@ -341,7 +358,7 @@ export const Screen5_DetailedReport: React.FC = () => {
                   ['Framework', settings.compliance.framework],
                   ['Consent model', settings.compliance.consentCapture],
                   ['Total query cost', KES(totalCost)],
-                  ['Average confidence', `${avgConfidence}%`],
+                   ['Average confidence', reportConfidence(avgConfidence)],
                   ['Sections verified', `${verifiedCount} / ${d.sections.length}`],
                   ['Events logged', String(d.events.length)],
                 ].map(([k, v]) => (
@@ -368,7 +385,7 @@ export const Screen5_DetailedReport: React.FC = () => {
                   }
                   subtitle={
                     <span className="font-mono text-[10px]">
-                      {sec.provider} · {sec.fields.length} fields · {sec.confidence}% confidence · {sec.latencyMs} ms ·{' '}
+                       {sec.provider} · {sec.fields.length} fields · {reportConfidence(sec.confidence)} confidence · {reportLatency(sec.latencyMs)} ·{' '}
                       {KES(sec.costKes)} · {formatDate(sec.retrievedAt, true)}
                     </span>
                   }
@@ -485,7 +502,7 @@ export const Screen5_DetailedReport: React.FC = () => {
                     { key: 'endpoint', header: 'Endpoint', render: (r) => <span className="font-mono text-[10px] break-all">{r.endpoint}</span>, className: 'hidden sm:table-cell' },
                     { key: 'fields', header: 'Fields', render: (r) => <span className="text-[10px]">{r.fieldsRequested.join(', ')}</span>, className: 'hidden xl:table-cell' },
                     { key: 'code', header: 'HTTP', render: (r) => <Badge tone={r.responseCode < 300 ? 'success' : 'danger'}>{r.responseCode}</Badge>, align: 'center', sortValue: (r) => r.responseCode },
-                    { key: 'lat', header: 'ms', render: (r) => <span className="font-mono">{r.latencyMs}</span>, align: 'right', className: 'hidden lg:table-cell', sortValue: (r) => r.latencyMs },
+                     { key: 'lat', header: 'ms', render: (r) => <span className="font-mono">{reportLatency(r.latencyMs)}</span>, align: 'right', className: 'hidden lg:table-cell', sortValue: (r) => r.latencyMs ?? -1 },
                     { key: 'cost', header: 'Cost', render: (r) => <span className="font-mono">{KES(r.costKes)}</span>, align: 'right', sortValue: (r) => r.costKes },
                     { key: 'consent', header: 'Consent', render: (r) => <span className="font-mono text-[9px] text-slate-500">{r.consentRef}</span>, className: 'hidden xl:table-cell' },
                     { key: 'outcome', header: 'Outcome', render: (r) => <Badge tone={tone(r.outcome)}>{label(r.outcome)}</Badge>, sortValue: (r) => r.outcome },

@@ -35,6 +35,19 @@ export function isLive() {
 
 const baseUrl = () => (process.env.DARAJA_ENV === 'production' ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke');
 
+function callbackUrl(callbackSecret) {
+  const token = encodeURIComponent(callbackSecret ?? '');
+  const configured = process.env.DARAJA_CALLBACK_URL?.replace(/\/+$/, '');
+  if (!configured) return `${process.env.PUBLIC_BASE_URL ?? ''}/api/wallet/topup/mpesa/callback/${token}`;
+  const url = new URL(configured);
+  const marker = '/callback/';
+  const index = url.pathname.indexOf(marker);
+  url.pathname = index >= 0
+    ? `${url.pathname.slice(0, index + marker.length)}${token}`
+    : `${url.pathname.replace(/\/+$/, '')}/${token}`;
+  return url.toString();
+}
+
 let cachedToken = null; // { value, expiresAt }
 async function oauthToken() {
   if (cachedToken && Date.now() < cachedToken.expiresAt - 60_000) return cachedToken.value;
@@ -50,7 +63,7 @@ async function oauthToken() {
 }
 
 /** Lipa na M-PESA Online (STK Push). Resolves with the Daraja checkout identifiers. */
-export async function stkPush({ msisdn, amount, accountRef, description }) {
+export async function stkPush({ msisdn, amount, accountRef, description, callbackToken: callbackSecret }) {
   const token = await oauthToken();
   const timestamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
   const password = Buffer.from(`${process.env.DARAJA_SHORTCODE}${process.env.DARAJA_PASSKEY}${timestamp}`).toString('base64');
@@ -66,7 +79,7 @@ export async function stkPush({ msisdn, amount, accountRef, description }) {
       PartyA: msisdn,
       PartyB: process.env.DARAJA_SHORTCODE,
       PhoneNumber: msisdn,
-      CallBackURL: process.env.DARAJA_CALLBACK_URL ?? `${process.env.PUBLIC_BASE_URL ?? ''}/api/wallet/topup/mpesa/callback`,
+      CallBackURL: callbackUrl(callbackSecret),
       AccountReference: (accountRef ?? 'IPRS Wallet').slice(0, 12),
       TransactionDesc: (description ?? 'Wallet top-up').slice(0, 13),
     }),

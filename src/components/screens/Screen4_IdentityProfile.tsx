@@ -9,6 +9,7 @@ import { useAppRouter } from '../../context/RouterContext';
 import { Badge, Button, Callout, EmptyState, Panel, ProgressBar, ResponsiveTable, Tabs, type Column } from '../ui';
 import { buildFullReportPdf } from '../../lib/reports';
 import { downloadBlob, formatDate, KES, maskPii, timeAgo } from '../../lib/format';
+import { averageReportConfidence, hasReportSection, reportAmount, reportBoolean, reportConfidence, reportCount, reportDate, reportLatency, reportPercent, reportScore, reportStatus, riskScoreAvailable } from '../../lib/report-values';
 import { getSnapshot } from '../../services/db';
 import type {
   AddressRecord, BusinessLink, CreditFacility, DocumentRecord, Dossier, DossierSection,
@@ -25,8 +26,8 @@ const stateTone = (s: VerificationState): 'success' | 'warning' | 'danger' | 'in
 const stateLabel = (s: VerificationState): string =>
   s === 'verified' ? 'Verified' : s === 'partial' ? 'Partial' : s === 'not_found' ? 'Not found' : s === 'mismatch' ? 'Mismatch' : 'Insufficient';
 
-const riskTone = (band: Dossier['risk']['band']): 'success' | 'warning' | 'danger' =>
-  band === 'Low' ? 'success' : band === 'Medium' ? 'warning' : 'danger';
+const riskTone = (band: Dossier['risk']['band']): 'success' | 'warning' | 'danger' | 'neutral' =>
+  band === 'Low' ? 'success' : band === 'Medium' ? 'warning' : band === 'High' ? 'danger' : 'neutral';
 
 /** Label → value grid that collapses to one column on phones. */
 const FactGrid: React.FC<{ items: { label: string; value: React.ReactNode; mono?: boolean; span?: boolean }[]; columns?: 2 | 3 }> = ({
@@ -70,6 +71,15 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
   const d = activeDossier;
   const maskMode = masked ? 'partial' : 'none';
   const m = (v: string) => maskPii(v, maskMode);
+  const taxAvailable = hasReportSection(d, ['kra']);
+  const mpesaAvailable = hasReportSection(d, ['mpesa']);
+  const creditAvailable = hasReportSection(d, ['crb', 'credit']);
+  const employerAvailable = hasReportSection(d, ['employer']);
+  const utilityAvailable = hasReportSection(d, ['kplc', 'utility']);
+  const screeningAvailable = hasReportSection(d, ['screening', 'pep', 'sanction', 'criminal']);
+  const businessAvailable = hasReportSection(d, ['business', 'company']);
+  const riskAvailable = riskScoreAvailable(d);
+  const photoAvailable = d.subject.photoMatchScore !== null && d.subject.photoMatchScore !== undefined;
 
   const cached = useMemo(() => Object.values(getSnapshot().dossierCache), []);
 
@@ -278,7 +288,7 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
       align: 'center',
       sortValue: (r) => r.responseCode,
     },
-    { key: 'latency', header: 'Latency', render: (r) => <span className="font-mono">{r.latencyMs} ms</span>, align: 'right', className: 'hidden lg:table-cell', sortValue: (r) => r.latencyMs },
+    { key: 'latency', header: 'Latency', render: (r) => <span className="font-mono">{reportLatency(r.latencyMs)}</span>, align: 'right', className: 'hidden lg:table-cell', sortValue: (r) => r.latencyMs ?? -1 },
     { key: 'cost', header: 'Cost', render: (r) => <span className="font-mono">{KES(r.costKes)}</span>, align: 'right', sortValue: (r) => r.costKes },
     {
       key: 'outcome',
@@ -314,14 +324,14 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
       header: 'Confidence',
       render: (r) => (
         <span className="flex items-center gap-2 min-w-[110px]">
-          <ProgressBar value={r.confidence} max={100} height={5} className="flex-1" />
-          <span className="text-[10px] font-mono text-slate-400 w-8 text-right">{r.confidence}%</span>
+          {r.confidence === null || r.confidence === undefined ? <span className="text-[10px] text-slate-500">Unavailable</span> : <ProgressBar value={r.confidence} max={100} height={5} className="flex-1" />}
+          <span className="text-[10px] font-mono text-slate-400 w-12 text-right">{reportConfidence(r.confidence)}</span>
         </span>
       ),
-      sortValue: (r) => r.confidence,
+      sortValue: (r) => r.confidence ?? -1,
     },
     { key: 'fields', header: 'Fields', render: (r) => <span className="font-mono text-[11px]">{r.fields.length}</span>, align: 'right', sortValue: (r) => r.fields.length },
-    { key: 'latency', header: 'Latency', render: (r) => <span className="font-mono text-[11px]">{r.latencyMs} ms</span>, align: 'right', className: 'hidden lg:table-cell', sortValue: (r) => r.latencyMs },
+    { key: 'latency', header: 'Latency', render: (r) => <span className="font-mono text-[11px]">{reportLatency(r.latencyMs)}</span>, align: 'right', className: 'hidden lg:table-cell', sortValue: (r) => r.latencyMs ?? -1 },
     { key: 'cost', header: 'Cost', render: (r) => <span className="font-mono text-[11px]">{KES(r.costKes)}</span>, align: 'right', className: 'hidden sm:table-cell', sortValue: (r) => r.costKes },
     { key: 'retrieved', header: 'Retrieved', render: (r) => <span className="text-[10px] text-slate-500">{timeAgo(r.retrievedAt)}</span>, className: 'hidden xl:table-cell', sortValue: (r) => r.retrievedAt },
   ];
@@ -344,13 +354,19 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
   };
 
   const totalCost = d.sections.reduce((a, s) => a + s.costKes, 0);
-  const avgConfidence = Math.round(d.sections.reduce((a, s) => a + s.confidence, 0) / Math.max(1, d.sections.length));
+  const avgConfidence = averageReportConfidence(d);
+  const confidenceAvailable = avgConfidence !== null;
   const verifiedCount = d.sections.filter((s) => s.state === 'verified').length;
 
   /* -------------------------------- render -------------------------------- */
 
   return (
     <div className="w-full text-xs text-slate-200">
+      {d.dataMode === 'simulated' && (
+        <Callout tone="warning" title="SIMULATED VERIFICATION">
+          This result uses seeded demo data and does not represent a live registry response.
+        </Callout>
+      )}
       {/* ---------------- subject banner ---------------- */}
       <div className="relative overflow-hidden border-b border-sky-900/50 bg-gradient-to-br from-[#08172b] via-[#071120] to-[#071120]">
         <div className="absolute inset-0 opacity-[0.07] pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, #22d3ee 1px, transparent 0)', backgroundSize: '22px 22px' }} />
@@ -362,7 +378,7 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
                   {d.subject.firstName[0]}
                   {d.subject.lastName[0]}
                 </div>
-                <span className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center ring-2 ring-[#071120] ${d.risk.band === 'Low' ? 'bg-emerald-500 text-emerald-950' : d.risk.band === 'Medium' ? 'bg-amber-500 text-amber-950' : 'bg-rose-500 text-white'}`}>
+                <span className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center ring-2 ring-[#071120] ${d.risk.band === 'Low' ? 'bg-emerald-500 text-emerald-950' : d.risk.band === 'Medium' ? 'bg-amber-500 text-amber-950' : d.risk.band === 'High' ? 'bg-rose-500 text-white' : 'bg-slate-600 text-white'}`}>
                   <ShieldCheck size={11} />
                 </span>
               </div>
@@ -391,10 +407,10 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
                   </span>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <Badge tone={riskTone(d.risk.band)}>Risk {d.risk.score}/100 · {d.risk.band}</Badge>
-                  <Badge tone="info">Photo match {d.subject.photoMatchScore}%</Badge>
+                   <Badge tone={riskTone(d.risk.band)}>Risk {riskAvailable ? `${d.risk.score}/100` : 'unavailable'} · {riskAvailable ? d.risk.band : 'Unknown'}</Badge>
+                   <Badge tone="info">Photo match {photoAvailable ? `${d.subject.photoMatchScore}%` : 'unavailable'}</Badge>
                   <Badge tone="neutral">{verifiedCount}/{d.sections.length} sections verified</Badge>
-                  <Badge tone="neutral">Confidence {avgConfidence}%</Badge>
+                   <Badge tone="neutral">Confidence {confidenceAvailable ? `${avgConfidence}%` : 'Unavailable'}</Badge>
                 </div>
               </div>
             </div>
@@ -478,19 +494,19 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
                           cy="18"
                           r="15.9"
                           fill="none"
-                          stroke={d.risk.band === 'Low' ? '#34d399' : d.risk.band === 'Medium' ? '#fbbf24' : '#fb7185'}
+                           stroke={d.risk.band === 'Low' ? '#34d399' : d.risk.band === 'Medium' ? '#fbbf24' : d.risk.band === 'High' ? '#fb7185' : '#475569'}
                           strokeWidth="3.4"
                           strokeLinecap="round"
-                          strokeDasharray={`${d.risk.score} 100`}
+                           strokeDasharray={`${riskAvailable ? d.risk.score : 0} 100`}
                         />
                       </svg>
                       <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className="text-lg font-black text-white">{d.risk.score}</span>
-                        <span className="text-[8px] uppercase tracking-wider text-slate-500">of 100</span>
+                         <span className="text-lg font-black text-white">{riskAvailable ? d.risk.score : 'Unavailable'}</span>
+                         <span className="text-[8px] uppercase tracking-wider text-slate-500">{riskAvailable ? 'of 100' : 'Risk unknown'}</span>
                       </div>
                     </div>
                     <div className="min-w-0">
-                      <Badge tone={riskTone(d.risk.band)}>{d.risk.band} risk</Badge>
+                       <Badge tone={riskTone(d.risk.band)}>{riskAvailable ? `${d.risk.band} risk` : 'Risk unknown'}</Badge>
                       <p className="text-[11px] text-slate-300 mt-1.5 leading-snug">{d.risk.verdict}</p>
                       <p className="text-[10px] text-slate-500 mt-1">{d.risk.recommendation}</p>
                       {d.risk.reviewRequired && (
@@ -527,17 +543,17 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
               <Panel title="Screening outcome" icon={<AlertTriangle size={14} className="text-amber-400" />}>
                 <div className="space-y-2">
                   {[
-                    { label: 'Politically exposed', hit: d.screening.pep, detail: d.screening.pepDetail },
-                    { label: 'Sanctions / watchlist', hit: d.screening.sanctions, detail: d.screening.sanctionsDetail },
-                    { label: 'Insolvency', hit: d.screening.insolvency, detail: d.screening.insolvency ? 'Active insolvency proceedings' : 'No filings' },
-                    { label: 'Adverse media', hit: d.screening.adverseMedia > 0, detail: `${d.screening.adverseMedia} item(s) found` },
-                    { label: 'Criminal records', hit: d.screening.criminalRecords.length > 0, detail: `${d.screening.criminalRecords.length} record(s)` },
-                    { label: 'Civil litigation', hit: d.screening.civilLitigation > 0, detail: `${d.screening.civilLitigation} case(s)` },
+                    { label: 'Politically exposed', hit: screeningAvailable ? d.screening.pep : null, detail: screeningAvailable ? d.screening.pepDetail : 'Unavailable' },
+                    { label: 'Sanctions / watchlist', hit: screeningAvailable ? d.screening.sanctions : null, detail: screeningAvailable ? d.screening.sanctionsDetail : 'Unavailable' },
+                    { label: 'Insolvency', hit: screeningAvailable ? d.screening.insolvency : null, detail: !screeningAvailable ? 'Unavailable' : d.screening.insolvency == null ? 'Unknown' : d.screening.insolvency ? 'Active insolvency proceedings' : 'No filings reported' },
+                    { label: 'Adverse media', hit: screeningAvailable && d.screening.adverseMedia !== null ? d.screening.adverseMedia > 0 : null, detail: reportCount(d.screening.adverseMedia, screeningAvailable) === 'Unavailable' ? 'Unavailable' : `${reportCount(d.screening.adverseMedia, screeningAvailable)} item(s) found` },
+                    { label: 'Criminal records', hit: screeningAvailable ? d.screening.criminalRecords.length > 0 : null, detail: screeningAvailable ? `${d.screening.criminalRecords.length} record(s)` : 'Unavailable' },
+                    { label: 'Civil litigation', hit: screeningAvailable && d.screening.civilLitigation !== null ? d.screening.civilLitigation > 0 : null, detail: reportCount(d.screening.civilLitigation, screeningAvailable) === 'Unavailable' ? 'Unavailable' : `${reportCount(d.screening.civilLitigation, screeningAvailable)} case(s)` },
                   ].map((row) => (
-                    <div key={row.label} className={`flex items-start gap-2 rounded-lg border px-2.5 py-2 ${row.hit ? 'border-amber-800/50 bg-amber-950/25' : 'border-sky-900/50 bg-[#061020]'}`}>
-                      {row.hit ? <AlertTriangle size={12} className="text-amber-400 mt-0.5 shrink-0" /> : <CheckCircle2 size={12} className="text-emerald-400 mt-0.5 shrink-0" />}
+                    <div key={row.label} className={`flex items-start gap-2 rounded-lg border px-2.5 py-2 ${row.hit === true ? 'border-amber-800/50 bg-amber-950/25' : row.hit === false ? 'border-emerald-900/50 bg-emerald-950/20' : 'border-sky-900/50 bg-[#061020]'}`}>
+                      {row.hit === null ? <MinusCircle size={12} className="text-slate-500 mt-0.5 shrink-0" /> : row.hit ? <AlertTriangle size={12} className="text-amber-400 mt-0.5 shrink-0" /> : <CheckCircle2 size={12} className="text-emerald-400 mt-0.5 shrink-0" />}
                       <div className="min-w-0">
-                        <div className={`text-[11px] font-semibold ${row.hit ? 'text-amber-200' : 'text-slate-300'}`}>{row.label}</div>
+                        <div className={`text-[11px] font-semibold ${row.hit === null ? 'text-slate-400' : row.hit ? 'text-amber-200' : 'text-slate-300'}`}>{row.label}</div>
                         <div className="text-[10px] text-slate-500 truncate">{row.detail}</div>
                       </div>
                     </div>
@@ -574,8 +590,8 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
                     { label: 'Registration serial', value: d.subject.registrationSerial ?? '—', mono: true },
                     { label: 'Marital status', value: d.subject.maritalStatus },
                     { label: 'Next of kin', value: masked ? m(d.subject.nextOfKin) : d.subject.nextOfKin },
-                    { label: 'Deceased flag', value: d.subject.deceased ? 'YES' : 'No' },
-                    { label: 'Biometric photo match', value: `${d.subject.photoMatchScore}%` },
+                    { label: 'Deceased flag', value: d.subject.deceased == null ? 'Unknown' : d.subject.deceased ? 'YES' : 'No' },
+                    { label: 'Biometric photo match', value: reportPercent(d.subject.photoMatchScore) },
                   ]}
                 />
               </Panel>
@@ -622,7 +638,7 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
                 <ResponsiveTable columns={docCols} rows={d.documents} rowKey={(r) => r.id} dense emptyTitle="No documents on file" />
               </Panel>
               <Panel title="Employment history" icon={<Briefcase size={14} className="text-cyan-400" />}>
-                <ResponsiveTable columns={empCols} rows={d.employment} rowKey={(r) => r.id} dense emptyTitle="No employment records" />
+                 <ResponsiveTable columns={empCols} rows={d.employment} rowKey={(r) => r.id} dense emptyTitle={employerAvailable ? 'No employment records returned' : 'Employment data unavailable'} />
               </Panel>
             </div>
           </>
@@ -635,13 +651,13 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
               <Panel title="Tax standing — KRA" icon={<Landmark size={14} className="text-emerald-400" />} className="lg:col-span-2">
                 <FactGrid
                   items={[
-                    { label: 'PIN', value: masked ? m(d.tax.pin) : d.tax.pin, mono: true },
-                    { label: 'Status', value: <Badge tone={d.tax.goodStanding ? 'success' : 'danger'}>{d.tax.status}</Badge> },
-                    { label: 'Registered on', value: formatDate(d.tax.registeredOn) },
-                    { label: 'Obligation types', value: d.tax.obligationTypes.join(', '), span: true },
-                    { label: 'Last return filed', value: formatDate(d.tax.lastReturnFiled) },
-                    { label: 'Outstanding liability', value: <span className={d.tax.outstandingKes > 0 ? 'text-rose-300 font-mono' : 'text-emerald-300 font-mono'}>{KES(d.tax.outstandingKes)}</span> },
-                    { label: 'Good standing', value: d.tax.goodStanding ? 'Yes' : 'No' },
+                     { label: 'PIN', value: taxAvailable && d.tax.pin ? (masked ? m(d.tax.pin) : d.tax.pin) : 'Unavailable', mono: true },
+                     { label: 'Status', value: <Badge tone={d.tax.goodStanding === true ? 'success' : d.tax.goodStanding === false ? 'danger' : 'neutral'}>{reportStatus(d.tax.status, taxAvailable)}</Badge> },
+                     { label: 'Registered on', value: reportDate(d.tax.registeredOn, taxAvailable) },
+                     { label: 'Obligation types', value: taxAvailable && d.tax.obligationTypes.length ? d.tax.obligationTypes.join(', ') : 'Unavailable', span: true },
+                     { label: 'Last return filed', value: reportDate(d.tax.lastReturnFiled, taxAvailable) },
+                     { label: 'Outstanding liability', value: <span className={!taxAvailable || d.tax.outstandingKes === null ? 'text-slate-400 font-mono' : d.tax.outstandingKes > 0 ? 'text-rose-300 font-mono' : 'text-emerald-300 font-mono'}>{reportAmount(d.tax.outstandingKes, taxAvailable)}</span> },
+                     { label: 'Good standing', value: reportBoolean(d.tax.goodStanding, taxAvailable) },
                   ]}
                 />
                 <div className="mt-4">
@@ -667,17 +683,17 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
                 <FactGrid
                   columns={2}
                   items={[
-                    { label: 'Registered name', value: masked ? m(d.mobileMoney.accountName) : d.mobileMoney.accountName },
-                    { label: 'MSISDN', value: masked ? m(d.mobileMoney.msisdn) : d.mobileMoney.msisdn, mono: true },
-                    { label: 'Status', value: <Badge tone={d.mobileMoney.status === 'Active' ? 'success' : 'warning'}>{d.mobileMoney.status}</Badge> },
-                    { label: 'Active since', value: formatDate(d.mobileMoney.activeSince) },
-                    { label: 'KYC tier', value: d.mobileMoney.kycTier },
-                    { label: 'Activity band', value: d.mobileMoney.activityBand },
-                    { label: 'Daily limit', value: KES(d.mobileMoney.dailyLimitKes, { decimals: false }), mono: true },
-                    { label: 'Txn limit', value: KES(d.mobileMoney.transactionLimitKes, { decimals: false }), mono: true },
-                    { label: 'Avg monthly turnover', value: KES(d.mobileMoney.avgMonthlyTurnoverKes, { decimals: false }), mono: true },
-                    { label: 'SIM swap events', value: <span className={d.mobileMoney.simSwapEvents > 0 ? 'text-amber-300 font-mono' : 'font-mono'}>{d.mobileMoney.simSwapEvents}</span> },
-                    { label: 'Last active', value: formatDate(d.mobileMoney.lastActive) },
+                     { label: 'Registered name', value: mpesaAvailable && d.mobileMoney.accountName ? (masked ? m(d.mobileMoney.accountName) : d.mobileMoney.accountName) : 'Unavailable' },
+                     { label: 'MSISDN', value: mpesaAvailable && d.mobileMoney.msisdn ? (masked ? m(d.mobileMoney.msisdn) : d.mobileMoney.msisdn) : 'Unavailable', mono: true },
+                     { label: 'Status', value: <Badge tone={d.mobileMoney.status === 'Active' && mpesaAvailable ? 'success' : 'neutral'}>{reportStatus(d.mobileMoney.status, mpesaAvailable)}</Badge> },
+                     { label: 'Active since', value: reportDate(d.mobileMoney.activeSince, mpesaAvailable) },
+                     { label: 'KYC tier', value: mpesaAvailable ? d.mobileMoney.kycTier : 'Unavailable' },
+                     { label: 'Activity band', value: reportStatus(d.mobileMoney.activityBand, mpesaAvailable) },
+                     { label: 'Daily limit', value: reportAmount(d.mobileMoney.dailyLimitKes, mpesaAvailable), mono: true },
+                     { label: 'Txn limit', value: reportAmount(d.mobileMoney.transactionLimitKes, mpesaAvailable), mono: true },
+                     { label: 'Avg monthly turnover', value: reportAmount(d.mobileMoney.avgMonthlyTurnoverKes, mpesaAvailable), mono: true },
+                     { label: 'SIM swap events', value: <span className={mpesaAvailable && d.mobileMoney.simSwapEvents !== null && d.mobileMoney.simSwapEvents > 0 ? 'text-amber-300 font-mono' : 'font-mono'}>{reportCount(d.mobileMoney.simSwapEvents, mpesaAvailable)}</span> },
+                     { label: 'Last active', value: reportDate(d.mobileMoney.lastActive, mpesaAvailable) },
                   ]}
                 />
               </Panel>
@@ -687,10 +703,10 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
               <Panel title="Credit bureau" subtitle={`${d.credit.bureau} — score, exposure and utilisation`} icon={<Gauge size={14} className="text-cyan-400" />} className="lg:col-span-2">
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   {[
-                    { label: 'Credit score', value: `${d.credit.score}`, sub: d.credit.scoreBand },
-                    { label: 'Listing status', value: d.credit.listingStatus, sub: `${d.credit.totalFacilities} facilities` },
-                    { label: 'Total outstanding', value: KES(d.credit.totalOutstandingKes, { decimals: false }), sub: `limit ${KES(d.credit.totalLimitKes, { decimals: false })}` },
-                    { label: 'Utilisation', value: `${d.credit.utilisationPct}%`, sub: `${d.credit.enquiries12m} enquiries / 12m` },
+                     { label: 'Credit score', value: reportScore(d.credit.score, creditAvailable, 900), sub: reportStatus(d.credit.scoreBand, creditAvailable) },
+                     { label: 'Listing status', value: reportStatus(d.credit.listingStatus, creditAvailable), sub: `${reportCount(d.credit.totalFacilities, creditAvailable)} facilities` },
+                     { label: 'Total outstanding', value: reportAmount(d.credit.totalOutstandingKes, creditAvailable), sub: `limit ${reportAmount(d.credit.totalLimitKes, creditAvailable)}` },
+                     { label: 'Utilisation', value: reportPercent(d.credit.utilisationPct, creditAvailable), sub: `${reportCount(d.credit.enquiries12m, creditAvailable)} enquiries / 12m` },
                   ].map((k) => (
                     <div key={k.label} className="rounded-lg bg-[#061020] border border-sky-900/50 px-3 py-2.5">
                       <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">{k.label}</div>
@@ -700,17 +716,17 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
                   ))}
                 </div>
                 <div className="mt-3 space-y-2">
-                  <ProgressBar value={d.credit.utilisationPct} max={100} label="Portfolio utilisation" right={`${d.credit.utilisationPct}%`} warning={70} danger={90} />
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[10px] text-slate-400">
-                    <div>Oldest facility: <span className="text-slate-200 font-mono">{formatDate(d.credit.oldestFacility)}</span></div>
-                    <div>Days since last enquiry: <span className="text-slate-200 font-mono">{d.credit.daysSinceLastEnquiry}</span></div>
-                    <div>Enquiries (12m): <span className="text-slate-200 font-mono">{d.credit.enquiries12m}</span></div>
+                   <ProgressBar value={creditAvailable && d.credit.utilisationPct !== null ? d.credit.utilisationPct : 0} max={100} label="Portfolio utilisation" right={reportPercent(d.credit.utilisationPct, creditAvailable)} warning={70} danger={90} />
+                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[10px] text-slate-400">
+                     <div>Oldest facility: <span className="text-slate-200 font-mono">{reportDate(d.credit.oldestFacility, creditAvailable)}</span></div>
+                     <div>Days since last enquiry: <span className="text-slate-200 font-mono">{reportCount(d.credit.daysSinceLastEnquiry, creditAvailable)}</span></div>
+                     <div>Enquiries (12m): <span className="text-slate-200 font-mono">{reportCount(d.credit.enquiries12m, creditAvailable)}</span></div>
                   </div>
                 </div>
 
                 <div className="mt-4">
                   <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-2">Credit facilities ({d.credit.facilities.length})</div>
-                  <ResponsiveTable columns={facilityCols} rows={d.credit.facilities} rowKey={(r) => r.id} dense initialSort={{ key: 'outstanding', dir: 'desc' }} emptyTitle="No facilities" />
+                   <ResponsiveTable columns={facilityCols} rows={d.credit.facilities} rowKey={(r) => r.id} dense initialSort={{ key: 'outstanding', dir: 'desc' }} emptyTitle={creditAvailable ? 'No facilities returned' : 'Credit data unavailable'} />
                 </div>
 
                 {d.credit.adverseListings.length > 0 && (
@@ -730,14 +746,14 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
                 <FactGrid
                   columns={2}
                   items={[
-                    { label: 'Provider', value: d.utility.provider },
-                    { label: 'Meter number', value: masked ? m(d.utility.meterNumber) : d.utility.meterNumber, mono: true },
-                    { label: 'Account status', value: <Badge tone={d.utility.accountStatus === 'Active' ? 'success' : 'warning'}>{d.utility.accountStatus}</Badge> },
-                    { label: 'Connected since', value: formatDate(d.utility.connectedSince) },
-                    { label: 'Avg monthly bill', value: KES(d.utility.avgMonthlyBillKes, { decimals: false }), mono: true },
-                    { label: 'Arrears', value: <span className={d.utility.arrearsKes > 0 ? 'text-rose-300 font-mono' : 'text-emerald-300 font-mono'}>{KES(d.utility.arrearsKes, { decimals: false })}</span> },
-                    { label: 'Payment behaviour', value: d.utility.paymentBehaviour },
-                    { label: 'Last payment', value: formatDate(d.utility.lastPayment) },
+                     { label: 'Provider', value: utilityAvailable ? d.utility.provider : 'Unavailable' },
+                     { label: 'Meter number', value: utilityAvailable && d.utility.meterNumber ? (masked ? m(d.utility.meterNumber) : d.utility.meterNumber) : 'Unavailable', mono: true },
+                     { label: 'Account status', value: <Badge tone={d.utility.accountStatus === 'Active' && utilityAvailable ? 'success' : 'neutral'}>{reportStatus(d.utility.accountStatus, utilityAvailable)}</Badge> },
+                     { label: 'Connected since', value: reportDate(d.utility.connectedSince, utilityAvailable) },
+                     { label: 'Avg monthly bill', value: reportAmount(d.utility.avgMonthlyBillKes, utilityAvailable), mono: true },
+                     { label: 'Arrears', value: <span className={!utilityAvailable || d.utility.arrearsKes === null ? 'text-slate-400 font-mono' : d.utility.arrearsKes > 0 ? 'text-rose-300 font-mono' : 'text-emerald-300 font-mono'}>{reportAmount(d.utility.arrearsKes, utilityAvailable)}</span> },
+                     { label: 'Payment behaviour', value: reportStatus(d.utility.paymentBehaviour, utilityAvailable) },
+                     { label: 'Last payment', value: reportDate(d.utility.lastPayment, utilityAvailable) },
                   ]}
                 />
                 <div className="mt-3 text-[10px] text-slate-500 leading-relaxed">
@@ -774,13 +790,13 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
 
             <Panel
               title="Business & beneficial ownership"
-              subtitle={`${d.business.links.length} company link(s) · director: ${d.business.isDirector ? 'yes' : 'no'} · beneficial owner: ${d.business.isBeneficialOwner ? 'yes' : 'no'} · sole proprietorships: ${d.business.soleProprietorships}`}
+               subtitle={`${d.business.links.length} company link(s) · director: ${reportBoolean(d.business.isDirector, businessAvailable)} · beneficial owner: ${reportBoolean(d.business.isBeneficialOwner, businessAvailable)} · sole proprietorships: ${reportCount(d.business.soleProprietorships, businessAvailable)}`}
               icon={<Building2 size={14} className="text-cyan-400" />}
             >
-              <ResponsiveTable columns={bizCols} rows={d.business.links} rowKey={(r) => r.id} dense emptyTitle="No business links" />
+               <ResponsiveTable columns={bizCols} rows={d.business.links} rowKey={(r) => r.id} dense emptyTitle={businessAvailable ? 'No business links returned' : 'Business data unavailable'} />
             </Panel>
 
-            {(d.screening.criminalRecords.length > 0 || d.screening.civilLitigation > 0 || d.screening.pep || d.screening.sanctions) && (
+            {(d.screening.criminalRecords.length > 0 || (d.screening.civilLitigation !== null && d.screening.civilLitigation > 0) || d.screening.pep || d.screening.sanctions) && (
               <Callout tone="warning" title="Screening hits requiring attention">
                 <div className="grid gap-2 sm:grid-cols-2">
                   {d.screening.criminalRecords.map((c) => (
@@ -825,7 +841,7 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
                     endpoint: e.endpoint,
                     fields: e.fieldsRequested.join('|'),
                     http: e.responseCode,
-                    latencyMs: e.latencyMs,
+                    latencyMs: e.latencyMs ?? 'Not provided',
                     costKes: e.costKes,
                     consentRef: e.consentRef,
                     outcome: e.outcome,

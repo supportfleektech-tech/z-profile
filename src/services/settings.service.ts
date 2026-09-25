@@ -112,7 +112,7 @@ export const settingsService = {
         version: 3,
         settings: s.settings,
         pricing: s.pricing,
-        providers: s.providerConfigs.map(({ consumerSecret, webhookSecret, ...rest }) => ({
+        providers: s.providerConfigs.map(({ consumerSecret: _consumerSecret, webhookSecret: _webhookSecret, ...rest }) => ({
           ...rest,
           consumerSecret: '[REDACTED]',
           webhookSecret: '[REDACTED]',

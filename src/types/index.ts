@@ -173,6 +173,30 @@ export interface SessionRecord {
   current: boolean;
 }
 
+export interface IprsBackup {
+  format: 'iprs-backup';
+  version: 1;
+  data: {
+    users: Record<string, unknown>[];
+    wallets: Record<string, unknown>[];
+    walletTransactions: Record<string, unknown>[];
+    payments: Record<string, unknown>[];
+    paymentMethods: Record<string, unknown>[];
+    providers: Record<string, unknown>[];
+    providerLogs: Record<string, unknown>[];
+    apiKeys: Record<string, unknown>[];
+    audit: Record<string, unknown>[];
+    usage: Record<string, unknown>[];
+    cases: Record<string, unknown>[];
+    invoices: Record<string, unknown>[];
+    notifications: Record<string, unknown>[];
+    activities: Record<string, unknown>[];
+    settings: SystemSettings;
+    pricing: PricingCatalog;
+    [key: string]: unknown;
+  };
+}
+
 export interface AuditEntry {
   id: string;
   at: string;
@@ -272,7 +296,7 @@ export interface VerificationEvent {
   endpoint: string;
   fieldsRequested: string[];
   responseCode: number;
-  latencyMs: number;
+  latencyMs: number | null;
   costKes: number;
   consentRef: string;
   outcome: VerificationState;
@@ -294,6 +318,7 @@ export interface Dossier {
   id: string;
   reportId: string;
   generatedAt: string;
+  dataMode: 'simulated' | 'provider';
   subject: {
     fullName: string;
     firstName: string;
@@ -318,8 +343,8 @@ export interface Dossier {
     constituency: string;
     ward: string;
     registrationSerial?: string;
-    photoMatchScore: number;
-    deceased: boolean;
+    photoMatchScore: number | null;
+    deceased: boolean | null;
   };
   addresses: AddressRecord[];
   documents: DocumentRecord[];
@@ -330,35 +355,35 @@ export interface Dossier {
     registeredOn: string;
     obligationTypes: string[];
     complianceYears: { year: string; returnsFiled: boolean; paid: boolean; outstandingKes: number }[];
-    outstandingKes: number;
+    outstandingKes: number | null;
     lastReturnFiled: string;
-    goodStanding: boolean;
+    goodStanding: boolean | null;
   };
   mobileMoney: {
     accountName: string;
     msisdn: string;
     activeSince: string;
     kycTier: string;
-    dailyLimitKes: number;
-    transactionLimitKes: number;
+    dailyLimitKes: number | null;
+    transactionLimitKes: number | null;
     activityBand: string;
-    avgMonthlyTurnoverKes: number;
+    avgMonthlyTurnoverKes: number | null;
     status: string;
-    simSwapEvents: number;
+    simSwapEvents: number | null;
     lastActive: string;
   };
   credit: {
     bureau: string;
-    score: number;
+    score: number | null;
     scoreBand: string;
     listingStatus: string;
-    totalFacilities: number;
-    totalOutstandingKes: number;
-    totalLimitKes: number;
-    utilisationPct: number;
+    totalFacilities: number | null;
+    totalOutstandingKes: number | null;
+    totalLimitKes: number | null;
+    utilisationPct: number | null;
     oldestFacility: string;
-    daysSinceLastEnquiry: number;
-    enquiries12m: number;
+    daysSinceLastEnquiry: number | null;
+    enquiries12m: number | null;
     facilities: CreditFacility[];
     adverseListings: { id: string; institution: string; amountKes: number; listedOn: string; type: string }[];
   };
@@ -367,31 +392,31 @@ export interface Dossier {
     meterNumber: string;
     accountStatus: string;
     connectedSince: string;
-    avgMonthlyBillKes: number;
-    arrearsKes: number;
+    avgMonthlyBillKes: number | null;
+    arrearsKes: number | null;
     paymentBehaviour: string;
     lastPayment: string;
   };
   business: {
     links: BusinessLink[];
-    isDirector: boolean;
-    isBeneficialOwner: boolean;
+    isDirector: boolean | null;
+    isBeneficialOwner: boolean | null;
     soleProprietorships: number;
   };
   screening: {
-    pep: boolean;
+    pep: boolean | null;
     pepDetail: string;
-    sanctions: boolean;
+    sanctions: boolean | null;
     sanctionsDetail: string;
-    adverseMedia: number;
+    adverseMedia: number | null;
     criminalRecords: { id: string; caseNo: string; court: string; charge: string; filedOn: string; outcome: string }[];
-    civilLitigation: number;
-    insolvency: boolean;
+    civilLitigation: number | null;
+    insolvency: boolean | null;
   };
   relationships: RelationshipLink[];
   risk: {
-    score: number;
-    band: 'Low' | 'Medium' | 'High';
+    score: number | null;
+    band: 'Low' | 'Medium' | 'High' | null;
     verdict: string;
     drivers: { factor: string; weight: number; contribution: number; direction: 'positive' | 'negative' }[];
     recommendation: string;
@@ -414,9 +439,9 @@ export interface DossierSection {
   title: string;
   provider: string;
   state: VerificationState;
-  confidence: number;
+  confidence: number | null;
   retrievedAt: string;
-  latencyMs: number;
+  latencyMs: number | null;
   costKes: number;
   summary: string;
   fields: ExtractedField[];
@@ -531,16 +556,20 @@ export interface ProviderRequestLog {
   errorMessage?: string;
 }
 
+export type MachineApiScope = 'pricing:read' | 'wallet:read' | 'verify:run' | 'verify:read' | 'report:read' | 'wallet:debit';
+
 export interface ApiKeyRecord {
   id: string;
   label: string;
   prefix: string;
-  secretMasked: string;
+  secretMasked?: string;
+  secretHash?: string;
   scopes: string[];
   providerId?: string;
   createdAt: string;
-  lastUsedAt?: string;
+  lastUsedAt?: string | null;
   expiresAt?: string;
+  revokedAt?: string | null;
   status: 'active' | 'revoked';
   ownerId: string;
   environment: 'sandbox' | 'live';
@@ -958,7 +987,7 @@ export interface SearchResult {
   query: string;
   profile: IdentityProfile;
   timestamp: string;
-  riskScore: number;
+  riskScore: number | null;
   dossierId?: string;
   costKes?: number;
   actorId?: string;
@@ -980,12 +1009,12 @@ export interface IdentityProfile {
   kraPin: string;
   avatarUrl?: string;
   isVerified: boolean;
-  riskScore: number;
-  trustLevel: 'Low' | 'Medium' | 'High';
+  riskScore: number | null;
+  trustLevel: 'Low' | 'Medium' | 'High' | 'Unknown';
   providers: {
     kra: { verified: boolean; status: string; pin: string; taxCompliance: boolean };
     mpesa: { verified: boolean; status: string; accountName: string; activeSince: string };
-    crb: { verified: boolean; status: string; score: number; defaultStatus: string };
+    crb: { verified: boolean; status: string; score: number | null; defaultStatus: string };
     employer: { verified: boolean; status: string; company: string; position: string };
     kplc: { verified: boolean; status: string; meterNumber: string; activeAccount: boolean };
   };
