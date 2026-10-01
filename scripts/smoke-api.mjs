@@ -15,6 +15,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const PORT = 8799;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -28,7 +29,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const dataDir = mkdtempSync(path.join(tmpdir(), 'iprs-apitest-'));
 const child = spawn(process.execPath, ['server/index.mjs'], {
-  cwd: new URL('..', import.meta.url).pathname,
+  cwd: path.dirname(path.dirname(fileURLToPath(import.meta.url))),
   env: { ...process.env, PORT: String(PORT), IPRS_DB: path.join(dataDir, 'test.sqlite') },
   stdio: ['ignore', 'pipe', 'pipe'],
 });

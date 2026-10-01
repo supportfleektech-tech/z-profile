@@ -22,12 +22,13 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { bootApp, loginAs, check, summarise, sleep, STORAGE_KEY } from './lib/app.mjs';
 import { platformRoutes } from '../src/types/routes.ts';
 import { pricingCatalog, pricingProvenance } from '../src/data/pricing.ts';
 import { spinModuleForItem } from '../src/data/spinModules.ts';
 
-const DIST = new URL('../dist/index.html', import.meta.url).pathname;
+const DIST = fileURLToPath(new URL('../dist/index.html', import.meta.url));
 const pass = (name, cond, detail = '') => check(name, cond, detail);
 
 /* ════════════════════ REQ #1 — blueprint / mobile view removed ════════════════════ */
