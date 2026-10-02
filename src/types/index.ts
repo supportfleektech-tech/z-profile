@@ -1010,3 +1010,43 @@ export interface ActivityItem {
   type: string;
   userId?: string;
 }
+
+/* ------------------------------------------------------------------ *
+ * Email outbox (Fleek IPRS mailer — Task 3; consumed by Tasks 4 & 5)
+ * ------------------------------------------------------------------ */
+
+/** Branded template ids. Every id is prefixed `fleek-iprs-` per the plan. */
+export type EmailTemplateId =
+  | 'fleek-iprs-registration-approved'
+  | 'fleek-iprs-pending-registration'
+  | 'fleek-iprs-sub-user-invite'
+  | 'fleek-iprs-sub-user-billing'
+  | 'fleek-iprs-sub-user-suspended';
+
+/** One queued/sent email — mirrored in the server `email_outbox` table. */
+export interface EmailOutboxEntry {
+  id: string;
+  to: string;
+  subject: string;
+  template: EmailTemplateId;
+  vars: Record<string, string | number | boolean>;
+  /** `dev-outbox` when written without a provider; `resend` when dispatched. */
+  channel: 'dev-outbox' | 'resend';
+  status: 'queued' | 'sent' | 'failed';
+  error?: string;
+  createdAt: string;
+  sentAt?: string;
+}
+
+export interface SendMailInput {
+  to: string;
+  subject: string;
+  template: EmailTemplateId;
+  vars?: Record<string, string | number | boolean>;
+}
+
+export interface SendMailResult {
+  ok: boolean;
+  message?: string;
+  outboxId?: string;
+}

@@ -15,6 +15,7 @@
 import { canCreateTier, effectivePermissions } from '../src/auth/permissions.ts';
 import { bearerOf, issueToken, verifyToken } from './auth.mjs';
 import * as daraja from './daraja.mjs';
+import * as mailer from './mailer.mjs';
 import * as spin from './spin.mjs';
 import { hashPassword, verifyPassword } from './passwords.mjs';
 import { hashStoredPasswords, dropLegacySubRoles } from './db.mjs';
@@ -37,6 +38,7 @@ import {
   cases, invoices, notifications, activities,
   settings, saveSettings, pricing, savePricing,
   stkPut, stkGet, stkSetResult, stkSetCancelled, stkDelete,
+  outboxList,
 } from './db.mjs';
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -294,6 +296,7 @@ app.get('/api/health', wrap((_req, res) => {
     storage: { engine: 'node:sqlite', path: DB_PATH },
     counts: stats(),
     gateway: daraja.describe(),
+    email: mailer.describe(),
     spin: spin.describe(),
   });
 }));
@@ -1143,6 +1146,48 @@ app.post('/api/usage', requireActor, wrap((req, res) => {
 
 app.get('/api/cases', requireActor, wrap((req, res) => res.json(ownOrAll(req, cases(), ['createdBy', 'assignedTo']))));
 app.get('/api/invoices', requirePerm('billing.view'), wrap((_req, res) => res.json(invoices())));
+
+/* ------------------------------ email (Resend) ---------------------------- */
+
+/**
+ * Ad-hoc send relay — Super Admin only.
+ *
+ * The `RESEND_API_KEY` never leaves this process: the browser posts the
+ * template + vars here and the server dispatches via `server/mailer.mjs`.
+ * Product flows do NOT come through this endpoint — registration approval
+ * (Task 4) and sub-user invite/billing (Task 5) call `sendMailInternal()`
+ * directly, server-side, so public registration and user-tier hosts are never
+ * blocked by this gate.
+ */
+app.post('/api/email/send', wrap(async (req, res) => {
+  const actor = actorOf(req);
+  if (!actor) return bad(res, 'Not authenticated.', 401);
+  if (actor.tier !== 'super_admin') {
+    return res.status(403).json({ ok: false, message: 'Only a Super Admin can send ad-hoc emails.' });
+  }
+  const { to, subject, template, vars } = req.body ?? {};
+  const result = await mailer.sendMailInternal({ to, subject, template, vars });
+  if (!result.ok && !result.outboxId) return bad(res, result.message ?? 'Email request refused.');
+  appendAudit({
+    actorId: actor.id, actorName: actor.name, actorTier: actor.tier, action: 'email.sent',
+    entity: 'EmailOutbox', entityId: result.outboxId ?? null,
+    severity: result.ok ? 'info' : 'warning', ip: clientIp(req),
+    detail: result.ok
+      ? `Ad-hoc email "${template}" → ${to} (${result.outboxId})`
+      : `Ad-hoc email "${template}" → ${to} FAILED — ${result.message}`,
+  });
+  res.status(result.ok ? 200 : 502).json(result);
+}));
+
+/** Outbox inspection — Super Admin only (dev-outbox review + prod audit). */
+app.get('/api/email/outbox', wrap((req, res) => {
+  const actor = actorOf(req);
+  if (!actor) return bad(res, 'Not authenticated.', 401);
+  if (actor.tier !== 'super_admin') {
+    return res.status(403).json({ ok: false, message: 'Only a Super Admin can inspect the email outbox.' });
+  }
+  res.json(outboxList(Math.min(Number(req.query.limit ?? 200), 1000)));
+}));
 app.get('/api/notifications', requireActor, wrap((req, res) => res.json(ownOrAll(req, notifications(), ['userId']))));
 app.get('/api/activities', requireActor, wrap((req, res) => res.json(ownOrAll(req, activities(), ['userId', 'actorId']))));
 
@@ -1170,6 +1215,7 @@ app.get('/api', wrap((_req, res) => {
       'GET  /api/pricing', 'PATCH /api/pricing',
       'GET  /api/audit', 'GET  /api/sessions', 'DELETE /api/sessions/:id',
       'GET  /api/usage', 'POST /api/usage',
+      'POST /api/email/send', 'GET  /api/email/outbox',
       'GET  /api/cases', 'GET  /api/invoices', 'GET  /api/notifications', 'GET  /api/activities',
     ],
   });

@@ -6,6 +6,7 @@ import type {
   AuditEntry,
   CaseItem,
   Dossier,
+  EmailOutboxEntry,
   InvoiceItem,
   NotificationItem,
   NotificationPreferences,
@@ -94,6 +95,9 @@ export interface DbState {
   /* platform */
   settings: SystemSettings;
   appearance: AppearanceSettings;
+
+  /* email outbox (LOCAL-mode mirror of the server `email_outbox` table) */
+  emailOutbox: EmailOutboxEntry[];
 }
 
 const STORAGE_KEY = 'workspace';
@@ -159,6 +163,7 @@ function freshState(): DbState {
     apiKeys: seedApiKeys.map((k) => ({ ...k })),
     settings: defaultSettings,
     appearance: defaultAppearance,
+    emailOutbox: [],
   };
 }
 

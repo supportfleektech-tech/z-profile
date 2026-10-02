@@ -254,6 +254,20 @@ CREATE TABLE IF NOT EXISTS stk_pending (
   cancelled INTEGER NOT NULL DEFAULT 0,
   result TEXT
 );
+
+CREATE TABLE IF NOT EXISTS email_outbox (
+  id TEXT PRIMARY KEY,
+  recipient TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  template TEXT NOT NULL,
+  channel TEXT NOT NULL DEFAULT 'dev-outbox',
+  status TEXT NOT NULL DEFAULT 'queued',
+  error TEXT,
+  created_at TEXT NOT NULL,
+  sent_at TEXT,
+  doc TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_created ON email_outbox(created_at DESC);
 `);
 
 /* -------------------------------------------------------------------------- */
@@ -599,6 +613,27 @@ export function stkDelete(id) {
   db.prepare('DELETE FROM stk_pending WHERE checkout_request_id = ?').run(id);
 }
 
+/* ------------------------------ email outbox ------------------------------ */
+
+export function outboxPut(entry) {
+  db.prepare(
+    `INSERT INTO email_outbox (id,recipient,subject,template,channel,status,error,created_at,sent_at,doc)
+     VALUES (@id,@recipient,@subject,@template,@channel,@status,@error,@created_at,@sent_at,@doc)
+     ON CONFLICT(id) DO UPDATE SET status=@status,error=@error,sent_at=@sent_at,doc=@doc`
+  ).run({
+    id: entry.id, recipient: entry.to, subject: entry.subject, template: entry.template,
+    channel: entry.channel ?? 'dev-outbox', status: entry.status ?? 'queued',
+    error: entry.error ?? null, created_at: entry.createdAt, sent_at: entry.sentAt ?? null,
+    doc: JSON.stringify(entry),
+  });
+  return entry;
+}
+
+export function outboxList(limit = 200) {
+  return db.prepare('SELECT doc FROM email_outbox ORDER BY created_at DESC LIMIT ?')
+    .all(limit).map((r) => j(r.doc));
+}
+
 /* -------------------------------------------------------------------------- */
 /*                                    seeding                                  */
 /* -------------------------------------------------------------------------- */
@@ -678,5 +713,6 @@ export function stats() {
     usage: count('usage'),
     cases: count('cases'),
     invoices: count('invoices'),
+    outbox: count('email_outbox'),
   };
 }
