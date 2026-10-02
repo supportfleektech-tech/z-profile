@@ -33,6 +33,7 @@ import { can as canPermission, dashboardLabelFor, effectivePermissions, roleLabe
 import { dossierToProfile } from '../data/dossier';
 import { subscriptionPlans } from '../data/pricing';
 import { uid } from '../lib/format';
+import { playSound } from '../lib/sounds';
 import type { SearchOutcome, SearchRequest } from '../services/search.service';
 import type { TestResult } from '../services/provider.service';
 
@@ -41,6 +42,7 @@ export interface ToastMessage {
   title: string;
   description?: string;
   type: 'success' | 'error' | 'info' | 'warning';
+  sound?: 'success' | 'error' | 'warning' | 'info' | 'search-start' | 'search-complete' | 'payment';
 }
 
 export interface ImpersonationBannerData {
@@ -223,6 +225,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const pushToast = useCallback((t: Omit<ToastMessage, 'id'>) => {
     const id = uid('toast');
     setToasts((prev) => [...prev.slice(-4), { ...t, id }]);
+    if (t.sound) playSound(t.sound);
     setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), 4600);
   }, []);
 
@@ -345,9 +348,9 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         browser: navigator.userAgent.includes('Firefox') ? 'Firefox' : navigator.userAgent.includes('Edg') ? 'Edge' : 'Chrome',
       });
       if (res.ok && res.user) {
-        pushToast({ title: 'Welcome back', description: `Signed in as ${res.user.name} — ${dashboardLabelFor(res.user)}`, type: 'success' });
+        pushToast({ title: 'Welcome back', description: `Signed in as ${res.user.name} — ${dashboardLabelFor(res.user)}`, type: 'success', sound: 'success' });
       } else {
-        pushToast({ title: 'Sign-in failed', description: res.message ?? 'Invalid credentials', type: 'error' });
+        pushToast({ title: 'Sign-in failed', description: res.message ?? 'Invalid credentials', type: 'error', sound: 'error' });
       }
       return { ok: res.ok, message: res.message, requiresMfa: res.requiresMfa };
     },
@@ -357,7 +360,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const logout = useCallback(
     (reason = 'Signed out') => {
       authService.logout(reason);
-      pushToast({ title: 'Signed out', description: 'Session ended securely', type: 'info' });
+      pushToast({ title: 'Signed out', description: 'Session ended securely', type: 'info', sound: 'info' });
     },
     [pushToast]
   );
@@ -579,7 +582,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const targetUser = impersonationTarget ?? me;
       if (!targetUser) return { ok: false, status: 'failed' as const, message: 'Not signed in.' };
       const res = await walletService.awaitMpesaStk(checkoutRequestID, targetUser.id, targetUser);
-      pushToast({ title: res.ok ? 'Wallet credited' : 'Top-up not completed', description: res.message, type: res.ok ? 'success' : 'error' });
+      pushToast({ title: res.ok ? 'Wallet credited' : 'Top-up not completed', description: res.message, type: res.ok ? 'success' : 'error', sound: res.ok ? 'payment' : 'error' });
       return res;
     },
     [impersonationTarget, me, pushToast]
@@ -601,7 +604,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const targetUser = impersonationTarget ?? me;
       if (!targetUser) return { ok: false, status: 'failed' as const, message: 'Not signed in.' };
       const res = await walletService.confirmCardPayment({ userId: targetUser.id, actor: targetUser, ...input });
-      pushToast({ title: res.ok ? 'Wallet credited' : 'Payment declined', description: res.message, type: res.ok ? 'success' : 'error' });
+      pushToast({ title: res.ok ? 'Wallet credited' : 'Payment declined', description: res.message, type: res.ok ? 'success' : 'error', sound: res.ok ? 'payment' : 'error' });
       return res;
     },
     [impersonationTarget, me, pushToast]
@@ -610,7 +613,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const refundPayment = useCallback(
     async (paymentId: string, reason: string) => {
       const res = await walletService.refund(effectiveUser, paymentId, reason);
-      pushToast({ title: res.ok ? 'Refund issued' : 'Refund rejected', description: res.message, type: res.ok ? 'success' : 'error' });
+      pushToast({ title: res.ok ? 'Refund issued' : 'Refund rejected', description: res.message, type: res.ok ? 'success' : 'error', sound: res.ok ? 'payment' : 'error' });
       return res;
     },
     [effectiveUser, pushToast]
@@ -619,7 +622,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const retryPayment = useCallback(
     async (paymentId: string) => {
       const res = await walletService.retryFailed(effectiveUser, paymentId);
-      pushToast({ title: res.ok ? 'Retry succeeded' : 'Retry failed', description: res.message, type: res.ok ? 'success' : 'warning' });
+      pushToast({ title: res.ok ? 'Retry succeeded' : 'Retry failed', description: res.message, type: res.ok ? 'success' : 'warning', sound: res.ok ? 'payment' : 'warning' });
       return res;
     },
     [effectiveUser, pushToast]
@@ -641,12 +644,13 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const runSearch = useCallback(
     async (req: Omit<SearchRequest, 'actor'>): Promise<SearchOutcome> => {
       const res = await searchService.run({ ...req, actor: effectiveUser });
-      if (!res.ok) pushToast({ title: 'Search rejected', description: res.message, type: 'error' });
+      if (!res.ok) pushToast({ title: 'Search rejected', description: res.message, type: 'error', sound: 'error' });
       else
         pushToast({
           title: 'Verification complete',
           description: `${res.dossier?.subject.fullName} — score ${res.dossier?.risk.score}/100 · ${res.costKes ? `KES ${res.costKes.toLocaleString('en-KE')} debited` : ''}`,
           type: 'success',
+          sound: 'search-complete',
         });
       return res;
     },

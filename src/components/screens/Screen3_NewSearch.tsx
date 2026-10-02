@@ -9,6 +9,7 @@ import { Badge, Button, Callout, Checkbox, Field, Panel, Select, TextInput } fro
 import { kycItems, kybItems, pricingProvenance, TRACING_IDS } from '../../data/pricing';
 import { spinModuleForItem } from '../../data/spinModules';
 import { KES, uid } from '../../lib/format';
+import { TerminalTypingEffect } from '../common/TerminalTypingEffect';
 import type { PricedItem } from '../../types';
 
 interface Props {
@@ -278,14 +279,14 @@ export const Screen3_NewSearch: React.FC<Props> = ({ onExecuteSearch }) => {
                 {stages.map((s, i) => (
                   <li key={`${s.label}-${i}`} className="flex items-center gap-2 text-[11px]">
                     {s.ok ? <CheckCircle2 size={12} className="text-emerald-400 shrink-0" /> : <XCircle size={12} className="text-rose-400 shrink-0" />}
-                    <span className="text-slate-300 flex-1 truncate">{s.label}</span>
+                    <TerminalTypingEffect text={s.label} speed={15} />
                     <span className="font-mono text-[10px] text-slate-500 shrink-0">{s.ms} ms</span>
                   </li>
                 ))}
                 {running && (
                   <li className="flex items-center gap-2 text-[11px] text-cyan-300">
                     <Loader2 size={12} className="animate-spin shrink-0" />
-                    <span>Working…</span>
+                    <TerminalTypingEffect text="Working…" speed={40} />
                   </li>
                 )}
               </ol>

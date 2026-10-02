@@ -118,7 +118,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children, onOpenCommandPalet
       )}
 
       {/* Nav groups */}
-      <nav className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-2 space-y-3" aria-label="Primary">
+      <nav className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-2 py-2 space-y-3" aria-label="Primary">
         {groups.map((cat) => (
           <div key={cat.key}>
             {!collapsed && <div className="px-2 mb-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">{cat.label}</div>}
