@@ -500,7 +500,7 @@ export const Screen5_DetailedReport: React.FC = () => {
             <Panel title="Appendix — attestation & disclaimer" icon={<ShieldCheck size={14} className="text-cyan-400" />}>
               <div className="space-y-2 text-[11px] text-slate-300 leading-relaxed">
                 <p>
-                  This report was generated automatically by the IPRS Kenya verification platform on{' '}
+                  This report was generated automatically by the Fleek IPRS verification platform on{' '}
                   <strong>{formatDate(d.generatedAt, true)}</strong> by <strong>{d.attestation.preparedBy}</strong> (
                   {d.attestation.preparedByTier}). It aggregates responses from {d.attestation.sources.length} authoritative sources:{' '}
                   {d.attestation.sources.join(', ')}.

@@ -75,7 +75,7 @@ export const PrintReport: React.FC<{ dossier: Dossier; settings: SystemSettings;
       {/* ---------------------------------- header --------------------------------- */}
       <header className="pr-header">
         <div>
-          <div className="pr-brand">IPRS KENYA</div>
+          <div className="pr-brand">FLEEK IPRS</div>
           <div className="pr-org">{settings.org.legalName}</div>
         </div>
         <div className="pr-header-right">
@@ -371,7 +371,7 @@ export const PrintReport: React.FC<{ dossier: Dossier; settings: SystemSettings;
         </table>
         <h3>Attestation</h3>
         <p className="pr-note">
-          This report was generated automatically by the IPRS Kenya platform from live registry queries executed on{' '}
+          This report was generated automatically by the Fleek IPRS platform from live registry queries executed on{' '}
           {formatDate(dossier.generatedAt, true)} EAT. The values reproduced above are the values returned by the source registries at
           those timestamps. No manual alteration has been made to the extracted data.
         </p>

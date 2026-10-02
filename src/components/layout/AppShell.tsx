@@ -259,7 +259,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children, onOpenCommandPalet
             <Menu size={18} />
           </button>
           <div className="flex-1 min-w-0">
-            <div className="text-xs font-semibold text-white truncate">{currentRoute?.shortTitle ?? 'IPRS'}</div>
+            <div className="text-xs font-semibold text-white truncate">{currentRoute?.shortTitle ?? 'Fleek IPRS'}</div>
             {tierMeta && <div className="text-[9px] uppercase tracking-wider text-slate-500 truncate">{tierMeta.label} workspace</div>}
           </div>
           <button

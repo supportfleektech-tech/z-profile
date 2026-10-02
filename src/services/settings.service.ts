@@ -108,7 +108,7 @@ export const settingsService = {
       {
         exportedAt: new Date().toISOString(),
         exportedBy: actor.email,
-        platform: 'IPRS Kenya',
+        platform: 'Fleek IPRS',
         version: 3,
         settings: s.settings,
         pricing: s.pricing,

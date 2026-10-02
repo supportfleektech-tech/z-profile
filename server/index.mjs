@@ -1,5 +1,5 @@
 /**
- * IPRS Kenya — reference backend scaffold.
+ * Fleek IPRS — reference backend scaffold.
  *
  * Express 5 + node:sqlite (Node 22+, zero native deps). The Vite dev server proxies
  * `/api` here; if this process is not running the frontend's service layer falls back
@@ -257,7 +257,7 @@ function applyWalletMovement({ userId, amount, direction, kind, channel, status,
       id: uid('pay'), userId, userName: user?.name ?? 'Unknown', userEmail: user?.email ?? '',
       at: transaction.at, channel: payment.channel ?? channel, method: payment.method ?? channel,
       amount: payment.amount ?? amount, currency: 'KES', status: payment.status ?? status,
-      reference: payment.reference ?? reference, gateway: payment.gateway ?? 'IPRS Gateway',
+      reference: payment.reference ?? reference, gateway: payment.gateway ?? 'Fleek IPRS Gateway',
       gatewayRef: payment.gatewayRef ?? gatewayRef, feeKes: payment.feeKes ?? 0,
       netKes: payment.netKes ?? (payment.status === 'success' ? (payment.amount ?? amount) : 0),
       walletTransactionId: transaction.id, rawResponse: payment.rawResponse,
@@ -286,7 +286,7 @@ function applyWalletMovement({ userId, amount, direction, kind, channel, status,
 app.get('/api/health', wrap((_req, res) => {
   res.json({
     ok: true,
-    service: 'iprs-demo-api',
+    service: 'fleek-iprs-api',
     version: '1.0.0',
     uptimeSec: Math.round((Date.now() - new Date(STARTED_AT).getTime()) / 1000),
     startedAt: STARTED_AT,
@@ -743,7 +743,7 @@ app.post('/api/wallet/topup/card/confirm', requireActor, requireSelfOrPrivileged
     intent: paymentIntentId, brand, maskedPan: maskCard(digits), holder: holder ?? '', expiry: expiry ?? '',
     authCode: declined ? null : `AUTH${crypto.randomInt(100000, 999999)}`,
     threeDs: declined ? 'failed' : 'authenticated', declineCode: declined ? 'incorrect_otp' : null,
-    processedAt: now(), acquirer: 'IPRS Acquiring (sandbox)', feeKes: fee,
+    processedAt: now(), acquirer: 'Fleek IPRS Acquiring (sandbox)', feeKes: fee,
   };
   const status = declined ? 'failed' : 'success';
 
@@ -753,7 +753,7 @@ app.post('/api/wallet/topup/card/confirm', requireActor, requireSelfOrPrivileged
     gatewayRef: raw.authCode ?? paymentIntentId,
     payment: {
       channel: 'card', method: `${brand} ${maskCard(digits)}`, amount: value, status, reference,
-      gateway: 'IPRS Card Acquirer', gatewayRef: raw.authCode ?? undefined, feeKes: declined ? 0 : fee,
+      gateway: 'Fleek IPRS Card Acquirer', gatewayRef: raw.authCode ?? undefined, feeKes: declined ? 0 : fee,
       netKes: declined ? 0 : value - fee, rawResponse: raw,
       failureReason: declined ? '3-D Secure authentication failed (OTP 000000 or malformed).' : undefined,
       ip: user?.lastLoginIp ?? clientIp(req),
@@ -1145,7 +1145,7 @@ app.get('/api/activities', requireActor, wrap((req, res) => res.json(ownOrAll(re
 
 app.get('/api', wrap((_req, res) => {
   res.json({
-    ok: true, service: 'iprs-demo-api', version: '1.0.0',
+    ok: true, service: 'fleek-iprs-api', version: '1.0.0',
     endpoints: [
       'GET  /api/health', 'POST /api/auth/login', 'POST /api/auth/logout', 'GET  /api/auth/me',
       'GET  /api/users', 'POST /api/users', 'GET  /api/users/:id', 'PATCH /api/users/:id',
@@ -1185,7 +1185,7 @@ if (seedResult.seeded) {
 }
 
 app.listen(PORT, HOST, () => {
-  console.log(`[api] IPRS demo backend listening on http://${HOST}:${PORT}`);
+  console.log(`[api] Fleek IPRS backend listening on http://${HOST}:${PORT}`);
   console.log(`[api] health check: http://127.0.0.1:${PORT}/api/health`);
 });
 

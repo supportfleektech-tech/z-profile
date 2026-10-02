@@ -17,7 +17,7 @@ function AppInner() {
   const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
-    document.title = `${currentPage.shortTitle} · IPRS Kenya`;
+    document.title = `${currentPage.shortTitle} · Fleek IPRS`;
   }, [currentPage, currentPath]);
 
   useEffect(() => {

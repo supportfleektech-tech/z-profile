@@ -4,7 +4,7 @@ import type { SystemSettings } from '../types';
 export const defaultSettings: SystemSettings = {
   org: {
     legalName: 'IPRS Identity Intelligence Limited',
-    tradingName: 'IPRS Kenya',
+    tradingName: 'Fleek IPRS',
     kraPin: 'P051776543K',
     registrationNo: 'C-2024-118834',
     address: 'Delta Corner, Building C — 3rd Floor, Chiromo Road, Westlands',
@@ -25,8 +25,8 @@ export const defaultSettings: SystemSettings = {
     loginHeadline: 'Better Intelligence. Safer Decisions.',
     loginSubtext:
       'Access comprehensive identity and background verification data from trusted Kenyan registries via Spin Mobile.',
-    emailSenderName: 'IPRS Kenya Platform',
-    reportFooter: 'IPRS Identity Intelligence Limited · Delta Corner, Westlands, Nairobi · support@iprs.co.ke',
+    emailSenderName: 'Fleek IPRS Platform',
+    reportFooter: 'Fleek IPRS · Delta Corner, Westlands, Nairobi · support@iprs.co.ke',
     reportDisclaimer:
       'This report is generated from third-party registry data and reflects the position at the time of enquiry only. It must not be used as the sole basis for an adverse decision without giving the subject an opportunity to respond (Data Protection Act 2019, s.35).',
     whiteLabel: false,
@@ -165,7 +165,7 @@ export const defaultSettings: SystemSettings = {
     smtpHost: 'smtp.sendgrid.net',
     smtpPort: 587,
     smtpUser: 'apikey',
-    smtpFrom: 'IPRS Kenya Platform <no-reply@iprs.co.ke>',
+    smtpFrom: 'Fleek IPRS Platform <no-reply@iprs.co.ke>',
     smsGateway: "Africa's Talking",
     smsApiKey: 'ats_••••••••••••c91f',
     smsSender: 'IPRS-KE',

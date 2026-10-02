@@ -60,7 +60,7 @@ const SCHEMA: Record<GroupKey, FieldDef[]> = {
     { kind: 'text', key: 'emailSenderName', label: 'Email sender name' },
     { kind: 'text', key: 'reportFooter', label: 'Report footer' },
     { kind: 'textarea', key: 'reportDisclaimer', label: 'Report disclaimer', rows: 4 },
-    { kind: 'toggle', key: 'whiteLabel', label: 'White-label reports', description: 'Replaces IPRS branding on PDF covers with the trading name' },
+    { kind: 'toggle', key: 'whiteLabel', label: 'White-label reports', description: 'Replaces Fleek IPRS branding on PDF covers with the trading name' },
   ],
   security: [
     { kind: 'number', key: 'passwordPolicy.minLength', label: 'Minimum password length', min: 6, max: 64 },

@@ -26,10 +26,10 @@ export function buildFullReportPdf(dossier: Dossier, settings: SystemSettings, o
   const s = dossier.subject;
   const doc = new PdfDocument({
     title: `Identity Verification Report — ${s.fullName}`,
-    author: 'IPRS Kenya',
+    author: 'Fleek IPRS',
     subject: `${s.fullName} · ID ${s.idNumber} · ${dossier.reportId}`,
     keywords: 'KYC, KYB, identity verification, background check, Kenya, IPRS',
-    headerLeft: 'IPRS Kenya — Identity Verification Report',
+    headerLeft: 'Fleek IPRS — Identity Verification Report',
     headerRight: dossier.reportId,
     footerLeft: `Generated ${formatDate(dossier.generatedAt, true)} EAT · Prepared by ${dossier.attestation.preparedBy}`,
     classification: dossier.attestation.classification,
@@ -381,7 +381,7 @@ export function buildFullReportPdf(dossier: Dossier, settings: SystemSettings, o
 
   doc.heading('Attestation', 2);
   doc.text(
-    `This report was generated automatically by the IPRS Kenya platform from live registry queries executed on ${formatDate(
+    `This report was generated automatically by the Fleek IPRS platform from live registry queries executed on ${formatDate(
       dossier.generatedAt,
       true
     )} EAT. The values reproduced above are the values returned by the source registries at those timestamps. No manual alteration has been made to the extracted data.`,
@@ -411,9 +411,9 @@ export function buildFullReportPdf(dossier: Dossier, settings: SystemSettings, o
 export function buildSummaryPdf(dossier: Dossier, settings: SystemSettings): PdfDocument {
   const doc = new PdfDocument({
     title: `Executive Summary — ${dossier.subject.fullName}`,
-    author: 'IPRS Kenya',
+    author: 'Fleek IPRS',
     subject: dossier.reportId,
-    headerLeft: 'IPRS Kenya — Executive Summary',
+    headerLeft: 'Fleek IPRS — Executive Summary',
     headerRight: dossier.reportId,
     footerLeft: `Generated ${formatDate(dossier.generatedAt, true)} EAT`,
     classification: dossier.attestation.classification,

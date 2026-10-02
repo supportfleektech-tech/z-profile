@@ -546,12 +546,12 @@ export class PdfDocument {
 
     const now = pdfDate();
     bodies[numInfo - 1] =
-      `<< /Title (${escapeText(sanitize(this.meta.title ?? 'IPRS Report'))}) ` +
-      `/Author (${escapeText(sanitize(this.meta.author ?? 'IPRS Kenya'))}) ` +
+      `<< /Title (${escapeText(sanitize(this.meta.title ?? 'Fleek IPRS Report'))}) ` +
+      `/Author (${escapeText(sanitize(this.meta.author ?? 'Fleek IPRS'))}) ` +
       `/Subject (${escapeText(sanitize(this.meta.subject ?? ''))}) ` +
       `/Keywords (${escapeText(sanitize(this.meta.keywords ?? ''))}) ` +
-      `/Creator (${escapeText(sanitize(this.meta.creator ?? 'IPRS Kenya Platform'))}) ` +
-      `/Producer (IPRS PdfDocument) /CreationDate (${now}) /ModDate (${now}) >>`;
+      `/Creator (${escapeText(sanitize(this.meta.creator ?? 'Fleek IPRS Platform'))}) ` +
+      `/Producer (Fleek IPRS PdfDocument) /CreationDate (${now}) /ModDate (${now}) >>`;
 
     // Assemble bytes, recording offsets.
     const parts: string[] = ['%PDF-1.4\n%\u00e2\u00e3\u00cf\u00d3\n'];

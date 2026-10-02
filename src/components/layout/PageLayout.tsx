@@ -58,7 +58,7 @@ export const PageLayout: React.FC<PageLayoutProps> = ({ children, title, badge =
             <div className="flex items-center gap-1.5 text-xs min-w-0 overflow-hidden">
               <button onClick={() => navigate('/dashboard')} className="text-slate-400 hover:text-slate-200 flex items-center gap-1 shrink-0">
                 <Home size={12} />
-                <span className="hidden md:inline">IPRS</span>
+                <span className="hidden md:inline">Fleek IPRS</span>
               </button>
               <ChevronRight size={11} className="text-slate-600 shrink-0" />
               <span className="text-cyan-400 font-semibold truncate">{title}</span>
