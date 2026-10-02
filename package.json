@@ -10,7 +10,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "db:reset": "node -e \"require('fs').rmSync('server/.data',{recursive:true,force:true});console.log('database cleared \u2014 reseeds on next start')\"",
+    "db:reset": "node -e \"require('fs').rmSync('server/.data',{recursive:true,force:true});console.log('database cleared — reseeds on next start')\"",
     "smoke:dom": "node scripts/smoke-dom.mjs",
     "smoke:flows": "node scripts/smoke-flows.mjs",
     "smoke:pdf": "SMOKE_DUMP_DIR=.smoke-artifacts node scripts/smoke-dom.mjs",
@@ -19,6 +19,10 @@
     "smoke:api": "node scripts/smoke-api.mjs"
   },
   "dependencies": {
+    "@sentry/node": "^11.4.0",
+    "@sentry/profiling-node": "^11.4.0",
+    "@sentry/react": "^11.4.0",
+    "@sentry/tracing": "^7.120.4",
     "clsx": "2.1.1",
     "cors": "^2.8.6",
     "express": "^5.2.1",

@@ -23,7 +23,7 @@ import { SPIN_MODULES, SPIN_AUTH } from '../src/data/spinModules.ts';
 import express from 'express';
 import cors from 'cors';
 import crypto from 'node:crypto';
-
+import * as Sentry from '@sentry/node';
 import {
   db, seedIfEmpty, stats, DB_PATH,
   users, findUser, findUserByEmail, putUser, deleteUser,
@@ -46,8 +46,22 @@ const PORT = Number(process.env.PORT ?? 8787);
 const HOST = process.env.HOST ?? '0.0.0.0';
 const STARTED_AT = new Date().toISOString();
 
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  environment: process.env.NODE_ENV ?? 'development',
+  tracesSampleRate: 0.1,
+  integrations: [
+    Sentry.httpIntegration(),
+  ],
+  beforeSend(event) {
+    if (process.env.NODE_ENV === 'development') return null;
+    return event;
+  },
+});
+
 const app = express();
 app.disable('x-powered-by');
+
 app.use(cors());
 // 12 MB: registration carries up to two ≤2 MB certification files as base64
 // dataURLs (≈2.7 MB each once encoded). Per-file caps are enforced in the
@@ -303,6 +317,35 @@ app.get('/api/health', wrap((_req, res) => {
     email: mailer.describe(),
     spin: spin.describe(),
   });
+}));
+
+/* Prometheus metrics endpoint for Grafana */
+app.get('/metrics', wrap((_req, res) => {
+  const mem = process.memoryUsage();
+  const uptime = Math.round((Date.now() - new Date(STARTED_AT).getTime()) / 1000);
+  const s = stats();
+  const lines = [
+    `fleek_uptime_seconds ${uptime}`,
+    `fleek_memory_rss_bytes ${mem.rss}`,
+    `fleek_memory_heap_used_bytes ${mem.heapUsed}`,
+    `fleek_memory_heap_total_bytes ${mem.heapTotal}`,
+    `fleek_memory_external_bytes ${mem.external}`,
+    `fleek_users_total ${s.users}`,
+    `fleek_wallets_total ${s.wallets}`,
+    `fleek_payments_total ${s.payments}`,
+    `fleek_payments_success ${s.payments.filter(p => p.status === 'success').length}`,
+    `fleek_payments_failed ${s.payments.filter(p => p.status === 'failed').length}`,
+    `fleek_payments_pending ${s.payments.filter(p => p.status === 'pending').length}`,
+    `fleek_transactions_total ${s.transactions}`,
+    `fleek_providers_total ${s.providers}`,
+    `fleek_audit_entries ${s.audit}`,
+    `fleek_sessions_active ${s.sessions}`,
+    `fleek_usage_records ${s.usage}`,
+    `fleek_cases_total ${s.cases}`,
+    `fleek_invoices_total ${s.invoices}`,
+  ];
+  res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+  res.send(lines.join('\n') + '\n');
 }));
 
 /* ---------------------------------- auth ---------------------------------- */
@@ -1601,6 +1644,12 @@ app.get('/api', wrap((_req, res) => {
       'GET  /api/cases', 'GET  /api/invoices', 'GET  /api/notifications', 'GET  /api/activities',
     ],
   });
+}));
+
+app.use(Sentry.expressErrorHandler({
+  shouldHandleError(error) {
+    return process.env.NODE_ENV === 'production';
+  },
 }));
 
 app.use('/api', (_req, res) => res.status(404).json({ ok: false, message: 'Unknown API endpoint.' }));
