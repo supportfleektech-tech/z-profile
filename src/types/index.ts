@@ -291,6 +291,8 @@ export interface AuditEntry {
   ip: string;
   detail?: string;
   meta?: Record<string, string | number | boolean>;
+  /** Set when the action was performed while impersonating another user. */
+  impersonatedBy?: { id: string; name: string };
 }
 
 /* ------------------------------------------------------------------ *

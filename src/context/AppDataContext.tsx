@@ -43,6 +43,11 @@ export interface ToastMessage {
   type: 'success' | 'error' | 'info' | 'warning';
 }
 
+export interface ImpersonationBannerData {
+  targetUser: SystemUser;
+  startedAt: string;
+}
+
 /** Legacy search-result shape still consumed by older screens. */
 export interface SearchResult {
   query: string;
@@ -62,6 +67,13 @@ interface AppDataContextType {
   permissions: Set<Permission>;
   login: (email: string, password: string) => Promise<{ ok: boolean; message?: string; requiresMfa?: boolean }>;
   logout: (reason?: string) => void;
+
+  /* ---- impersonation (Super Admin only) ---- */
+  impersonatingUserId: string | null;
+  impersonationTarget: SystemUser | null;
+  impersonationBanner: ImpersonationBannerData | null;
+  setImpersonatingUserId: (userId: string | null) => void;
+  clearImpersonation: () => void;
 
   /* ---- people ---- */
   users: SystemUser[];
@@ -186,8 +198,93 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [currentPlan, setCurrentPlanState] = useState('professional');
   const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'yearly'>('monthly');
   const [apiMode, setApiMode] = useState<ApiMode>(getApiMode());
+  const [impersonatingUserId, setImpersonatingUserIdState] = useState<string | null>(null);
 
   const me = useMemo(() => currentUser(), [db.currentUserId, db.users]);
+
+  // Impersonation target resolution
+  const impersonationTarget = useMemo(() => {
+    if (!impersonatingUserId) return null;
+    return db.users.find((u) => u.id === impersonatingUserId) ?? null;
+  }, [impersonatingUserId, db.users]);
+
+  // Effective current user (impersonation target when active, otherwise actual user)
+  const effectiveUser = useMemo(() => impersonationTarget ?? me, [impersonationTarget, me]);
+
+  // Impersonation banner data
+  const impersonationBanner = useMemo((): ImpersonationBannerData | null => {
+    if (!impersonationTarget) return null;
+    return {
+      targetUser: impersonationTarget,
+      startedAt: new Date().toISOString(), // This will be updated when impersonation starts
+    };
+  }, [impersonationTarget]);
+
+  const pushToast = useCallback((t: Omit<ToastMessage, 'id'>) => {
+    const id = uid('toast');
+    setToasts((prev) => [...prev.slice(-4), { ...t, id }]);
+    setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), 4600);
+  }, []);
+
+  const dismissToast = useCallback((id: string) => setToasts((prev) => prev.filter((x) => x.id !== id)), []);
+
+  const setImpersonatingUserId = useCallback((userId: string | null) => {
+    const s = getSnapshot();
+    const actor = s.users.find((u) => u.id === s.currentUserId);
+    if (!actor || actor.tier !== 'super_admin') {
+      pushToast({ title: 'Impersonation denied', description: 'Only Super Admins can impersonate users.', type: 'error' });
+      return;
+    }
+
+    if (userId === null) {
+      // Stopping impersonation
+      if (impersonatingUserId) {
+        const target = s.users.find((u) => u.id === impersonatingUserId);
+        auditService.append({
+          actorId: actor.id,
+          actorName: actor.name,
+          actorTier: actor.tier,
+          action: 'impersonation.stopped',
+          entity: 'SystemUser',
+          entityId: impersonatingUserId,
+          severity: 'info',
+          ip: actor.lastLoginIp ?? '0.0.0.0',
+          detail: `Stopped acting as ${target?.name ?? 'unknown user'}`,
+        });
+        pushToast({ title: 'Impersonation ended', description: `Restored to ${actor.name}`, type: 'info' });
+      }
+      setImpersonatingUserIdState(null);
+    } else {
+      // Starting impersonation
+      const target = s.users.find((u) => u.id === userId);
+      if (!target) {
+        pushToast({ title: 'Impersonation failed', description: 'Target user not found.', type: 'error' });
+        return;
+      }
+      if (target.tier === 'super_admin') {
+        pushToast({ title: 'Impersonation denied', description: 'Cannot impersonate another Super Admin.', type: 'error' });
+        return;
+      }
+      auditService.append({
+        actorId: actor.id,
+        actorName: actor.name,
+        actorTier: actor.tier,
+        action: 'impersonation.started',
+        entity: 'SystemUser',
+        entityId: userId,
+        severity: 'warning',
+        ip: actor.lastLoginIp ?? '0.0.0.0',
+        detail: `Started acting as ${target.name} (${target.email})`,
+        meta: { impersonatorId: actor.id, targetId: target.id },
+      });
+      setImpersonatingUserIdState(userId);
+      pushToast({ title: 'Now acting as', description: `${target.name} — ${roleLabelFor(target)}`, type: 'warning' });
+    }
+  }, [impersonatingUserId, pushToast]);
+
+  const clearImpersonation = useCallback(() => {
+    setImpersonatingUserId(null);
+  }, [setImpersonatingUserId]);
 
   // Probe the backend once; fall back to the local adapter silently.
   useEffect(() => {
@@ -214,16 +311,8 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setSidebarCollapsed(a.sidebarCollapsed);
   }, [db.appearance]);
 
-  const pushToast = useCallback((t: Omit<ToastMessage, 'id'>) => {
-    const id = uid('toast');
-    setToasts((prev) => [...prev.slice(-4), { ...t, id }]);
-    setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), 4600);
-  }, []);
-
-  const dismissToast = useCallback((id: string) => setToasts((prev) => prev.filter((x) => x.id !== id)), []);
-
-  const permissions = useMemo(() => (me ? effectivePermissions(me) : new Set<Permission>()), [me]);
-  const can = useCallback((p: Permission) => canPermission(me, p), [me]);
+  const permissions = useMemo(() => (effectiveUser ? effectivePermissions(effectiveUser) : new Set<Permission>()), [effectiveUser]);
+  const can = useCallback((p: Permission) => canPermission(effectiveUser, p), [effectiveUser]);
 
   /* ---------------------------------- auth ---------------------------------- */
 
@@ -449,79 +538,87 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   /* ------------------------------ wallet & payments ------------------------------ */
 
-  const wallet = useMemo(() => (me ? ensureWallet(me.id) : ensureWallet('__anonymous__')), [me]);
+  const wallet = useMemo(() => {
+    const targetUser = impersonationTarget ?? me;
+    return targetUser ? ensureWallet(targetUser.id) : ensureWallet('__anonymous__');
+  }, [impersonationTarget, me]);
 
   const topUpMpesa = useCallback(
     async (input: { phone: string; amount: number }) => {
-      if (!me) return { ok: false, message: 'Not signed in.' };
-      return walletService.requestMpesaStk({ userId: me.id, phone: input.phone, amount: input.amount });
+      const targetUser = impersonationTarget ?? me;
+      if (!targetUser) return { ok: false, message: 'Not signed in.' };
+      return walletService.requestMpesaStk({ userId: targetUser.id, phone: input.phone, amount: input.amount });
     },
-    [me]
+    [impersonationTarget, me]
   );
 
   const awaitMpesaTopUp = useCallback(
     async (checkoutRequestID: string) => {
-      if (!me) return { ok: false, status: 'failed' as const, message: 'Not signed in.' };
-      const res = await walletService.awaitMpesaStk(checkoutRequestID, me.id, me);
+      const targetUser = impersonationTarget ?? me;
+      if (!targetUser) return { ok: false, status: 'failed' as const, message: 'Not signed in.' };
+      const res = await walletService.awaitMpesaStk(checkoutRequestID, targetUser.id, targetUser);
       pushToast({ title: res.ok ? 'Wallet credited' : 'Top-up not completed', description: res.message, type: res.ok ? 'success' : 'error' });
       return res;
     },
-    [me, pushToast]
+    [impersonationTarget, me, pushToast]
   );
 
   const cancelMpesaTopUp = useCallback((checkoutRequestID: string) => walletService.cancelMpesaStk(checkoutRequestID), []);
 
   const startCardTopUp = useCallback(
     (input: { amount: number; cardNumber: string; expiry: string; cvc: string; holder: string }) => {
-      if (!me) return Promise.resolve({ ok: false, message: 'Not signed in.' });
-      return walletService.startCardPayment({ userId: me.id, ...input });
+      const targetUser = impersonationTarget ?? me;
+      if (!targetUser) return Promise.resolve({ ok: false, message: 'Not signed in.' });
+      return walletService.startCardPayment({ userId: targetUser.id, ...input });
     },
-    [me]
+    [impersonationTarget, me]
   );
 
   const confirmCardTopUp = useCallback(
     async (input: { paymentIntentId: string; otp: string; amount: number; cardNumber: string; holder: string; expiry: string }) => {
-      if (!me) return { ok: false, status: 'failed' as const, message: 'Not signed in.' };
-      const res = await walletService.confirmCardPayment({ userId: me.id, actor: me, ...input });
+      const targetUser = impersonationTarget ?? me;
+      if (!targetUser) return { ok: false, status: 'failed' as const, message: 'Not signed in.' };
+      const res = await walletService.confirmCardPayment({ userId: targetUser.id, actor: targetUser, ...input });
       pushToast({ title: res.ok ? 'Wallet credited' : 'Payment declined', description: res.message, type: res.ok ? 'success' : 'error' });
       return res;
     },
-    [me, pushToast]
+    [impersonationTarget, me, pushToast]
   );
 
   const refundPayment = useCallback(
     async (paymentId: string, reason: string) => {
-      const res = await walletService.refund(me, paymentId, reason);
+      const res = await walletService.refund(effectiveUser, paymentId, reason);
       pushToast({ title: res.ok ? 'Refund issued' : 'Refund rejected', description: res.message, type: res.ok ? 'success' : 'error' });
       return res;
     },
-    [me, pushToast]
+    [effectiveUser, pushToast]
   );
 
   const retryPayment = useCallback(
     async (paymentId: string) => {
-      const res = await walletService.retryFailed(me, paymentId);
+      const res = await walletService.retryFailed(effectiveUser, paymentId);
       pushToast({ title: res.ok ? 'Retry succeeded' : 'Retry failed', description: res.message, type: res.ok ? 'success' : 'warning' });
       return res;
     },
-    [me, pushToast]
+    [effectiveUser, pushToast]
   );
 
   const updateWalletSettings = useCallback(
     (patch: Partial<Wallet>) => {
-      if (!me) return wallet;
-      const next = walletService.updateWalletSettings(me.id, patch, me);
+      const targetUser = impersonationTarget ?? me;
+      if (!targetUser) return wallet;
+      const next = walletService.updateWalletSettings(targetUser.id, patch, effectiveUser);
       pushToast({ title: 'Wallet settings saved', type: 'success' });
       return next;
     },
-    [me, wallet, pushToast]
+    [impersonationTarget, me, wallet, effectiveUser, pushToast]
   );
 
   /* ---------------------------------- search ---------------------------------- */
 
   const runSearch = useCallback(
     async (req: Omit<SearchRequest, 'actor'>): Promise<SearchOutcome> => {
-      const res = await searchService.run({ ...req, actor: me });
+      const res = await searchService.run({ ...req, actor: effectiveUser });
       if (!res.ok) pushToast({ title: 'Search rejected', description: res.message, type: 'error' });
       else
         pushToast({
@@ -531,7 +628,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         });
       return res;
     },
-    [me, pushToast]
+    [effectiveUser, pushToast]
   );
 
   /* --------------------------------- settings --------------------------------- */
@@ -570,23 +667,23 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   /* --------------------------------- derived --------------------------------- */
 
   const visibleCases = useMemo(() => {
-    if (!me) return [];
-    if (canPermission(me, 'case.view.all')) return db.cases;
-    return db.cases.filter((c) => c.ownerId === me.id || c.assignedTo === me.name);
-  }, [db.cases, me]);
+    if (!effectiveUser) return [];
+    if (canPermission(effectiveUser, 'case.view.all')) return db.cases;
+    return db.cases.filter((c) => c.ownerId === effectiveUser.id || c.assignedTo === effectiveUser.name);
+  }, [db.cases, effectiveUser]);
 
   const visibleNotifications = useMemo(() => {
-    if (!me) return [];
+    if (!effectiveUser) return [];
     return db.notifications.filter((n) => {
-      if (n.userId && n.userId !== me.id) return false;
-      if (n.tiers && !n.tiers.includes(me.tier)) return false;
+      if (n.userId && n.userId !== effectiveUser.id) return false;
+      if (n.tiers && !n.tiers.includes(effectiveUser.tier)) return false;
       return true;
     });
-  }, [db.notifications, me]);
+  }, [db.notifications, effectiveUser]);
 
   const unreadCount = useMemo(() => visibleNotifications.filter((n) => !n.read).length, [visibleNotifications]);
 
-  const myTransactions = useMemo(() => (me ? db.walletTransactions.filter((t) => t.userId === me.id) : []), [db.walletTransactions, me]);
+  const myTransactions = useMemo(() => (effectiveUser ? db.walletTransactions.filter((t) => t.userId === effectiveUser.id) : []), [db.walletTransactions, effectiveUser]);
 
   const stats = useMemo(() => {
     const total = db.usage.length;
@@ -603,19 +700,25 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const paymentStats = useMemo(() => walletService.stats(), [db.payments, db.wallets]);
   const providerUsage = useMemo(() => providerService.usage(), [db.providerLogs, db.usage, db.providerConfigs]);
-  const settingsHealth = useMemo(() => settingsService.health(me), [db.settings, db.providerConfigs, db.apiKeys, db.users, db.pricing, me]);
+  const settingsHealth = useMemo(() => settingsService.health(effectiveUser), [db.settings, db.providerConfigs, db.apiKeys, db.users, db.pricing, effectiveUser]);
   const activeProfile = useMemo(() => dossierToProfile(db.activeDossier), [db.activeDossier]);
 
   const value: AppDataContextType = {
-    isAuthenticated: Boolean(me),
-    currentUser: me,
-    tier: me?.tier ?? null,
-    roleLabel: me ? roleLabelFor(me) : 'Guest',
-    dashboardLabel: dashboardLabelFor(me),
+    isAuthenticated: Boolean(effectiveUser),
+    currentUser: effectiveUser,
+    tier: effectiveUser?.tier ?? null,
+    roleLabel: effectiveUser ? roleLabelFor(effectiveUser) : 'Guest',
+    dashboardLabel: dashboardLabelFor(effectiveUser),
     can,
     permissions,
     login,
     logout,
+
+    impersonatingUserId,
+    impersonationTarget,
+    impersonationBanner,
+    setImpersonatingUserId,
+    clearImpersonation,
 
     users: db.users,
     addUser,
@@ -635,7 +738,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     markNotificationRead,
     markAllNotificationsRead,
     addNotification,
-    notificationPrefs: me ? prefsFor(me.id) : settingsService.notificationPrefs('__anon__'),
+    notificationPrefs: effectiveUser ? prefsFor(effectiveUser.id) : settingsService.notificationPrefs('__anon__'),
     setNotificationPrefs,
 
     providers: db.providerConfigs,
@@ -680,14 +783,14 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     searchHistory: db.searchHistory,
     runSearch,
     priceSearch: (ids) => searchService.price(ids),
-    preflightSearch: (ids) => searchService.preflight(me, ids),
+    preflightSearch: (ids) => searchService.preflight(effectiveUser, ids),
 
     usage: db.usage,
-    quota: quotaFor(me?.id ?? null),
+    quota: quotaFor(effectiveUser?.id ?? null),
 
     settings: db.settings,
     updateSettings,
-    canEditSettingsGroup: (g) => settingsService.canEdit(me, g),
+    canEditSettingsGroup: (g) => settingsService.canEdit(effectiveUser, g),
     settingsHealth,
     appearance: db.appearance,
     setAppearance,
@@ -699,7 +802,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     activities: db.activities,
     addActivity: (title, type) => {
       setState((prev) => ({
-        activities: [{ id: uid('a'), title, time: 'Just now', status: 'Completed', type, userId: me?.id }, ...prev.activities].slice(0, 20),
+        activities: [{ id: uid('a'), title, time: 'Just now', status: 'Completed', type, userId: effectiveUser?.id }, ...prev.activities].slice(0, 20),
       }));
     },
     toasts,

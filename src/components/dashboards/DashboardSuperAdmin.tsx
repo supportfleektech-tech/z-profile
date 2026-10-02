@@ -1,7 +1,7 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ShieldCheck, TrendingUp, AlertTriangle, ArrowRight, Power, Terminal, Database, ScrollText,
-  Users, Server, KeyRound, Scale, Landmark, Activity, Lock, BarChart3,
+  Users, Server, KeyRound, Scale, Landmark, Activity, Lock, BarChart3, UserCog, X, Search,
 } from 'lucide-react';
 import { useAppData } from '../../context/AppDataContext';
 import { useAppRouter } from '../../context/RouterContext';
@@ -24,9 +24,11 @@ export const DashboardSuperAdmin: React.FC = () => {
   const {
     currentUser, users, payments, paymentStats, providerUsage, providers, audit, settings,
     settingsHealth, stats, apiMode, sessions, wallets, pricing, pushToast, can,
+    impersonatingUserId, impersonationTarget, impersonationBanner, setImpersonatingUserId, clearImpersonation,
   } = useAppData();
   const prov = pricingProvenance(pricing);
   const { navigate } = useAppRouter();
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -44,6 +46,43 @@ export const DashboardSuperAdmin: React.FC = () => {
       return 0;
     }
   }, [users.length, payments.length, audit.length]);
+
+  // Impersonable users: all non-Super Admin, Active users
+  const impersonableUsers = useMemo(() => users.filter((u) => u.tier !== 'super_admin' && u.status === 'Active'), [users]);
+
+  // Activity for impersonated user
+  interface UnifiedActivity {
+    id: string;
+    action: string;
+    actorName: string;
+    detail?: string;
+    time: string;
+  }
+
+  const impersonatedActivity = useMemo((): UnifiedActivity[] => {
+    if (!impersonationTarget) return [];
+    const auditEntries: UnifiedActivity[] = audit
+      .filter((a) => a.actorId === impersonationTarget.id)
+      .map((a) => ({
+        id: a.id,
+        action: a.action,
+        actorName: a.actorName,
+        detail: a.detail,
+        time: a.at,
+      }));
+    const activities: UnifiedActivity[] = getSnapshot().activities
+      .filter((a) => a.userId === impersonationTarget.id)
+      .map((a) => ({
+        id: a.id,
+        action: a.type,
+        actorName: a.title,
+        detail: a.type,
+        time: a.time,
+      }));
+    return [...auditEntries, ...activities]
+      .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+      .slice(0, 20);
+  }, [impersonationTarget, audit]);
 
   const tierCols: Column<{ tier: (typeof TIER_ORDER)[number]; total: number; active: number; mfa: number; perms: number }>[] = [
     {
@@ -117,8 +156,47 @@ export const DashboardSuperAdmin: React.FC = () => {
     },
   ];
 
-  return (
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const filteredUsers = useMemo(() => {
+    if (!searchQuery.trim()) return impersonableUsers;
+    const q = searchQuery.toLowerCase();
+    return impersonableUsers.filter((u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
+  }, [impersonableUsers, searchQuery]);
+
+  const handleStartImpersonation = (userId: string) => {
+    setImpersonatingUserId(userId);
+    setPickerOpen(false);
+    setSearchQuery('');
+  };
+
+  const handleStopImpersonation = () => {
+    clearImpersonation();
+  };
+
+return (
     <div className="w-full text-xs text-slate-200 space-y-4">
+      {/* Impersonation banner */}
+      {impersonationBanner && (
+        <Callout tone="warning" title="Acting as another user" icon={<UserCog size={14} />} className="border-amber-800/60 bg-amber-950/30">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center">
+                <UserCog size={14} className="text-amber-300" />
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-white">{impersonationBanner.targetUser.name}</div>
+                <div className="text-[11px] text-slate-400">{impersonationBanner.targetUser.email} · {TIER_META[impersonationBanner.targetUser.tier].label}</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="xs" variant="secondary" icon={<Search size={11} />} onClick={() => navigate('/audit')}>View activity</Button>
+              <Button size="xs" variant="primary" icon={<X size={11} />} onClick={handleStopImpersonation}>Stop acting as</Button>
+            </div>
+          </div>
+        </Callout>
+      )}
+
       <div className="rounded-xl border border-amber-800/40 bg-gradient-to-r from-[#241a08] via-[#08172b] to-[#071120] p-3 sm:p-4 flex flex-col lg:flex-row lg:items-center gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
@@ -133,12 +211,54 @@ export const DashboardSuperAdmin: React.FC = () => {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" size="sm" icon={<KeyRound size={13} />} onClick={() => navigate('/admin')}>Team &amp; access</Button>
+          <Button variant="secondary" size="sm" icon={<KeyRound size={13} />} onClick={() => navigate('/admin')}>Team & access</Button>
           <Button variant="secondary" size="sm" icon={<Server size={13} />} onClick={() => navigate('/providers')}>Providers</Button>
           <Button variant="secondary" size="sm" icon={<Landmark size={13} />} onClick={() => navigate('/payments')}>Payments</Button>
           <Button variant="secondary" size="sm" icon={<BarChart3 size={13} />} onClick={() => navigate('/analytics')}>Analytics</Button>
           <Button variant="secondary" size="sm" icon={<ScrollText size={13} />} onClick={() => navigate('/audit')}>Audit log</Button>
           <Button variant="primary" size="sm" icon={<Terminal size={13} />} onClick={() => navigate('/settings')}>System settings</Button>
+          {/* Impersonation user picker */}
+          {!impersonatingUserId && (
+            <div className="relative">
+              <Button variant="outline" size="sm" icon={<UserCog size={13} />} onClick={() => setPickerOpen(true)}>
+                Act as user
+              </Button>
+              {pickerOpen && (
+                <div className="absolute right-0 top-full mt-1.5 z-20 w-64 rounded-lg border border-sky-800/50 bg-sky-950/95 backdrop-blur-sm shadow-xl overflow-hidden">
+                  <div className="p-2 border-b border-sky-800/50">
+                    <label htmlFor="impersonation-search" className="sr-only">Search users</label>
+                    <input
+                      id="impersonation-search"
+                      type="text"
+                      placeholder="Search users..."
+                      className="w-full px-2 py-1.5 text-[11px] bg-sky-900/50 border border-sky-800/50 rounded focus:outline-none focus:border-cyan-500"
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                  <div className="max-h-60 overflow-y-auto">
+                    {filteredUsers.length === 0 ? (
+                      <div className="p-3 text-center text-[11px] text-slate-500">No users match</div>
+                    ) : (
+                      filteredUsers.map((u) => (
+                        <button
+                          key={u.id}
+                          onClick={() => handleStartImpersonation(u.id)}
+                          className="w-full px-3 py-2 text-left hover:bg-sky-800/30 transition-colors border-b border-sky-900/50 last:border-0"
+                        >
+                          <div className="text-[11px] font-medium text-white truncate">{u.name}</div>
+                          <div className="text-[10px] text-slate-400 truncate flex items-center gap-1.5">
+                            <Badge tone={u.tier === 'admin' ? 'accent' : 'info'} className="text-[9px]">{TIER_META[u.tier].label}</Badge>
+                            <span>{u.email}</span>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -312,6 +432,30 @@ export const DashboardSuperAdmin: React.FC = () => {
           </button>
         ))}
       </div>
+
+      {/* User Activity panel (when impersonating) */}
+      {impersonationTarget && (
+        <Panel title="User Activity" subtitle={`Recent actions by ${impersonationTarget.name}`} icon={<Activity size={14} className="text-emerald-400" />} className="lg:col-span-full">
+          {impersonatedActivity.length === 0 ? (
+            <div className="text-[11px] text-slate-500">No recent activity for this user.</div>
+          ) : (
+            <div className="divide-y divide-sky-950/60">
+              {impersonatedActivity.map((a, idx) => (
+                <div key={`${a.id}-${idx}`} className="py-1.5 flex items-start gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] text-slate-200 truncate">
+                      <span className="font-mono text-emerald-300">{a.action ?? 'activity.logged'}</span> — {a.actorName}
+                    </div>
+                    <div className="text-[10px] text-slate-500 truncate">{a.detail}</div>
+                  </div>
+                  <span className="text-[9px] text-slate-600 shrink-0 font-mono">{timeAgo(a.time)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      )}
 
       {!can('settings.edit.platform') && (
         <p className="text-[10px] text-slate-600 text-center pb-1">Platform policy editing is restricted.</p>

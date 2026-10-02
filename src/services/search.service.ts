@@ -254,6 +254,7 @@ export const searchService = {
       severity: dossier.risk.reviewRequired ? 'warning' : 'info',
       ip: actor.lastLoginIp ?? '0.0.0.0',
       detail: `${dossier.subject.fullName} — ${req.checkIds.length} checks, KES ${price.total.toLocaleString('en-KE')}, score ${dossier.risk.score}/100, consent ${consentRef}`,
+      impersonatedBy: req.actor !== actor ? { id: req.actor.id, name: req.actor.name } : undefined,
     });
 
     return { ok: true, dossier, costKes: price.total, reference, consentRef, stages };
