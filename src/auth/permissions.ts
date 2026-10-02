@@ -45,6 +45,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'provider.logs.view': 'View provider request logs',
   'apikeys.manage': 'Manage API keys',
   'users.view': 'View team members',
+  'registrations.review': 'Review registration requests',
   'users.create': 'Create user accounts',
   'users.create.admin': 'Create admin accounts',
   'users.edit': 'Edit accounts & roles',
@@ -80,7 +81,7 @@ export const PERMISSION_GROUPS: { label: string; permissions: Permission[] }[] =
   },
   {
     label: 'People & Access',
-    permissions: ['users.view', 'users.create', 'users.create.admin', 'users.edit', 'users.delete', 'roles.view', 'roles.edit', 'sessions.view.all', 'sessions.revoke', 'audit.view', 'audit.export'],
+    permissions: ['users.view', 'registrations.review', 'users.create', 'users.create.admin', 'users.edit', 'users.delete', 'roles.view', 'roles.edit', 'sessions.view.all', 'sessions.revoke', 'audit.view', 'audit.export'],
   },
   {
     label: 'Platform & Governance',

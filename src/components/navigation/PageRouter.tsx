@@ -5,6 +5,9 @@ import { findRoute } from '../../types/routes';
 import { AccessDenied } from './AccessDenied';
 
 import { LoginPage } from '../../pages/LoginPage';
+import { GetStartedPage } from '../../pages/GetStartedPage';
+import { RegisterPage } from '../../pages/RegisterPage';
+import { PendingApprovalsPage } from '../../pages/PendingApprovalsPage';
 import { DashboardPage } from '../../pages/DashboardPage';
 import { NewSearchPage } from '../../pages/NewSearchPage';
 import { IdentityProfilePage } from '../../pages/IdentityProfilePage';
@@ -36,7 +39,10 @@ export const PageRouter: React.FC = () => {
 
   const route = findRoute(currentPath);
 
+  // Public surfaces — reachable with no session (registration funnel).
   if (currentPath === '/login') return <LoginPage />;
+  if (currentPath === '/get-started') return <GetStartedPage />;
+  if (currentPath === '/register') return <RegisterPage />;
 
   if (!isAuthenticated) return <LoginPage />;
 
@@ -73,6 +79,8 @@ export const PageRouter: React.FC = () => {
       return <ApiDocsPage />;
     case '/admin':
       return <AdminConsolePage />;
+    case '/pending-approvals':
+      return <PendingApprovalsPage />;
     case '/settings':
       return <SystemSettingsPage />;
     case '/audit':

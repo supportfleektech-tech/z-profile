@@ -268,6 +268,16 @@ CREATE TABLE IF NOT EXISTS email_outbox (
   doc TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_created ON email_outbox(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS registrations (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'pending',
+  contact_email TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT '',
+  doc TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reg_status ON registrations(status);
+CREATE INDEX IF NOT EXISTS idx_reg_email ON registrations(contact_email);
 `);
 
 /* -------------------------------------------------------------------------- */
@@ -632,6 +642,34 @@ export function outboxPut(entry) {
 export function outboxList(limit = 200) {
   return db.prepare('SELECT doc FROM email_outbox ORDER BY created_at DESC LIMIT ?')
     .all(limit).map((r) => j(r.doc));
+}
+
+/* --------------------------- registrations ---------------------------- */
+
+export function registrations(status) {
+  const rows = status
+    ? db.prepare('SELECT doc FROM registrations WHERE status = ? ORDER BY created_at DESC').all(status)
+    : db.prepare('SELECT doc FROM registrations ORDER BY created_at DESC').all();
+  return rows.map((r) => j(r.doc));
+}
+export function registrationById(id) {
+  return rowDoc(db.prepare('SELECT doc FROM registrations WHERE id = ?').get(id));
+}
+export function pendingRegistrationForEmail(email) {
+  return rowDoc(
+    db.prepare(`SELECT doc FROM registrations WHERE lower(contact_email) = lower(?) AND status = 'pending' ORDER BY created_at DESC`).get(String(email).trim())
+  );
+}
+export function putRegistration(r) {
+  db.prepare(
+    `INSERT INTO registrations (id,status,contact_email,created_at,doc)
+     VALUES (@id,@status,@contact_email,@created_at,@doc)
+     ON CONFLICT(id) DO UPDATE SET status=@status,contact_email=@contact_email,doc=@doc`
+  ).run({
+    id: r.id, status: r.status, contact_email: r.contactEmail,
+    created_at: r.createdAt, doc: JSON.stringify(r),
+  });
+  return r;
 }
 
 /* -------------------------------------------------------------------------- */

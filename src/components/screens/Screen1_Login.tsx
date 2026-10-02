@@ -223,6 +223,17 @@ export const Screen1_Login: React.FC<Screen1LoginProps> = ({ onLoginSuccess }) =
                   </Button>
                 </form>
 
+                <div className="mt-4 text-center text-[11px] text-slate-400">
+                  New to Fleek IPRS?{' '}
+                  <button type="button" onClick={() => navigate('/get-started')} className="text-cyan-300 hover:text-cyan-200 font-semibold">
+                    Get started
+                  </button>
+                  {' · '}
+                  <button type="button" onClick={() => navigate('/register')} className="text-cyan-300 hover:text-cyan-200 font-semibold">
+                    Register your organisation
+                  </button>
+                </div>
+
                 <div className="mt-4 pt-4 border-t border-sky-900/50">
                   <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">
                     <KeyRound size={11} /> Demo accounts — one click to fill

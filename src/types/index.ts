@@ -98,6 +98,7 @@ export type Permission =
   | 'users.create.admin'
   | 'users.edit'
   | 'users.delete'
+  | 'registrations.review'
   | 'roles.view'
   | 'roles.edit'
   | 'sessions.view.all'
@@ -118,6 +119,11 @@ export interface SystemUser {
   id: string;
   name: string;
   email: string;
+  /**
+   * Platform username (email local-part + 4 random uppercase alphanumerics),
+   * minted on registration approval. Optional so seeded/legacy accounts parse.
+   */
+  username?: string;
   /** Demo-only credential store. A real deployment hashes this server-side. */
   password: string;
   phone: string;
@@ -148,6 +154,44 @@ export interface SystemUser {
 
 /** Legacy alias — `UserItem` was consumed by older screens. */
 export type UserItem = SystemUser;
+
+/* ------------------------------------------------------------------ *
+ * Public registration (Fleek IPRS SaaS — Task 4)
+ * ------------------------------------------------------------------ */
+
+/** Lifecycle of a public registration request. */
+export type RegistrationStatus = 'pending' | 'approved' | 'rejected';
+
+/**
+ * One organisation registration request awaiting Super Admin review.
+ *
+ * Certification files are stored as base64 dataURLs (each capped at 2 MB —
+ * enforced client-side in the Register screen and server-side in
+ * `POST /api/auth/register`). Approved requests materialise as a `SystemUser`
+ * with `tier: 'user'`; the link is kept in `createdUserId`.
+ */
+export interface PendingRegistration {
+  id: string;
+  company: string;
+  kraPin: string;
+  county: string;
+  contactName: string;
+  contactEmail: string;
+  contactPhone: string;
+  /** Certificate of incorporation — base64 dataURL, required, ≤2 MB decoded. */
+  certOfIncorporation: string;
+  /** KRA PIN certificate — base64 dataURL, optional, ≤2 MB decoded. */
+  kraPinCert?: string;
+  /** Director/ID copy — base64 dataURL, optional, ≤2 MB decoded. */
+  idCopy?: string;
+  termsAcceptedAt: string;
+  status: RegistrationStatus;
+  createdAt: string;
+  decidedAt?: string;
+  decidedBy?: string;
+  rejectionReason?: string;
+  createdUserId?: string;
+}
 
 export interface RoleDefinition {
   tier: RoleTier;

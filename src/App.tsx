@@ -43,21 +43,27 @@ function AppInner() {
     return () => window.removeEventListener('keydown', onKey);
   }, [can]);
 
+  // Public surfaces stay reachable with no session (registration funnel).
+  const PUBLIC_PATHS = ['/login', '/get-started', '/register'];
+
   useEffect(() => {
     if (authChecked) {
-      if (!isAuthenticated && currentPath !== '/login') navigate('/login');
+      if (!isAuthenticated && !PUBLIC_PATHS.includes(currentPath)) navigate('/login');
       if (isAuthenticated && currentPath === '/login') navigate('/dashboard');
     } else {
       setAuthChecked(true);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, currentPath, navigate, authChecked]);
+
+  const onPublicSurface = PUBLIC_PATHS.includes(currentPath);
 
   const handleVerificationComplete = useCallback(() => {
     setIsSearchModalOpen(false);
     navigate('/identity-profile');
   }, [navigate]);
 
-  const onLogin = currentPath === '/login' || !isAuthenticated;
+  const onLogin = onPublicSurface || !isAuthenticated;
 
   return (
     <div className="min-h-screen min-h-[100dvh] bg-[#050b14] text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-black">

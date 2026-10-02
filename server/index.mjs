@@ -39,6 +39,7 @@ import {
   settings, saveSettings, pricing, savePricing,
   stkPut, stkGet, stkSetResult, stkSetCancelled, stkDelete,
   outboxList,
+  registrations, registrationById, pendingRegistrationForEmail, putRegistration,
 } from './db.mjs';
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -48,7 +49,10 @@ const STARTED_AT = new Date().toISOString();
 const app = express();
 app.disable('x-powered-by');
 app.use(cors());
-app.use(express.json({ limit: '2mb' }));
+// 12 MB: registration carries up to three ≤2 MB certification files as base64
+// dataURLs (≈2.7 MB each once encoded). Per-file caps are enforced in the
+// route handler itself — this limit only stops absurd payloads.
+app.use(express.json({ limit: '12mb' }));
 
 /* -------------------------------------------------------------------------- */
 /*                                  utilities                                  */
@@ -373,6 +377,200 @@ app.get('/api/auth/me', wrap((req, res) => {
   const actor = actorOf(req);
   if (!actor) return bad(res, 'Not authenticated.', 401);
   res.json({ ok: true, user: publicUser(actor) });
+}));
+
+/* ------------------------- public registration ------------------------ */
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_REG_FILE_BYTES = 2 * 1024 * 1024;
+
+/** Decoded byte size of a base64 dataURL (or raw base64). -1 when unparseable. */
+function dataUrlBytes(value) {
+  const s = String(value ?? '');
+  const comma = s.indexOf(',');
+  const clean = (comma >= 0 ? s.slice(comma + 1) : s).replace(/\s/g, '');
+  if (!clean || !/^[A-Za-z0-9+/=]*$/.test(clean)) return -1;
+  const padding = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0;
+  return Math.floor((clean.length * 3) / 4) - padding;
+}
+
+/**
+ * Minimal in-memory throttle for the public registration route: 20
+ * submissions per IP per 10 minutes. No auth on this route by design, so the
+ * throttle (plus strict validation) is the abuse backstop.
+ */
+const regHits = new Map();
+function registerThrottled(ip) {
+  const WINDOW_MS = 10 * 60 * 1000;
+  const MAX_HITS = 20;
+  const at = Date.now();
+  const arr = (regHits.get(ip) ?? []).filter((t) => at - t < WINDOW_MS);
+  arr.push(at);
+  regHits.set(ip, arr);
+  return arr.length > MAX_HITS;
+}
+
+/**
+ * Public organisation registration — NO auth. Strict validation + per-file
+ * size caps; accepted requests land in the Super Admin review queue.
+ */
+app.post('/api/auth/register', wrap(async (req, res) => {
+  const ip = clientIp(req);
+  if (registerThrottled(ip)) return bad(res, 'Too many registration attempts — try again in a few minutes.', 429);
+  const b = req.body ?? {};
+  const company = String(b.company ?? '').trim();
+  const county = String(b.county ?? '').trim();
+  const contactName = String(b.contactName ?? '').trim();
+  const contactEmail = String(b.contactEmail ?? '').trim().toLowerCase();
+  const contactPhone = String(b.contactPhone ?? '').trim();
+  if (!company) return bad(res, 'Company or organisation name is required.');
+  if (!county) return bad(res, 'County is required.');
+  if (!contactName) return bad(res, 'Contact person name is required.');
+  if (!EMAIL_RE.test(contactEmail)) return bad(res, 'Enter a valid contact email address.');
+  if (!contactPhone) return bad(res, 'Contact phone number is required.');
+  if (!b.certOfIncorporation) return bad(res, 'Attach your certificate of incorporation.');
+  for (const [label, file] of [
+    ['Certificate of incorporation', b.certOfIncorporation],
+    ['KRA PIN certificate', b.kraPinCert],
+    ['Director ID copy', b.idCopy],
+  ]) {
+    if (!file) continue;
+    const size = dataUrlBytes(file);
+    if (size < 0) return bad(res, `${label}: that file could not be read — re-attach it.`);
+    if (size > MAX_REG_FILE_BYTES) return bad(res, `${label} exceeds the 2 MB limit — attach a smaller file.`);
+  }
+  if (b.termsAccepted !== true) return bad(res, 'Accept the Terms of Service and Data Protection consent to continue.');
+  if (findUserByEmail(contactEmail)) return bad(res, 'An account with that email already exists — sign in instead.', 409);
+  if (pendingRegistrationForEmail(contactEmail)) return bad(res, 'A registration for that email is already awaiting review.', 409);
+
+  await sleep(220);
+  const at = now();
+  const reg = {
+    id: uid('reg'), company, kraPin: String(b.kraPin ?? '').trim(), county,
+    contactName, contactEmail, contactPhone,
+    certOfIncorporation: b.certOfIncorporation,
+    ...(b.kraPinCert ? { kraPinCert: b.kraPinCert } : {}),
+    ...(b.idCopy ? { idCopy: b.idCopy } : {}),
+    termsAcceptedAt: at, status: 'pending', createdAt: at,
+  };
+  putRegistration(reg);
+  appendAudit({
+    actorId: 'public', actorName: contactName, actorTier: 'user',
+    action: 'registration.submitted', entity: 'PendingRegistration', entityId: reg.id,
+    severity: 'info', ip, detail: `${company} <${contactEmail}> requested a workspace`,
+  });
+  // Notify the Super Admin reviewer (best-effort — never fails the submission).
+  const reviewer = users().find((u) => u.tier === 'super_admin');
+  if (reviewer) {
+    await mailer.sendMailInternal({
+      to: reviewer.email,
+      subject: `Fleek IPRS — new registration pending review (${company})`,
+      template: 'fleek-iprs-pending-registration',
+      vars: { company, contactEmail, certStatus: 'pending verification' },
+    });
+  }
+  res.status(201).json({ ok: true, pendingId: reg.id });
+}));
+
+/* ------------------------- registration review ------------------------ */
+
+/** Review queue — Super Admin only (`registrations.review`). */
+app.get('/api/registrations', requirePerm('registrations.review'), wrap((req, res) => {
+  const status = req.query.status ? String(req.query.status) : undefined;
+  if (status && !['pending', 'approved', 'rejected'].includes(status)) return bad(res, 'Unknown registration status.');
+  res.json(registrations(status));
+}));
+
+/** Username rule: email local-part + 4 random uppercase alphanumerics. */
+function buildUsername(email) {
+  const local = (String(email).split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '') || 'user');
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let suffix = '';
+  for (let i = 0; i < 4; i += 1) suffix += alphabet[crypto.randomInt(alphabet.length)];
+  return `${local}${suffix}`;
+}
+
+function tempPassword() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const pick = (n) => Array.from({ length: n }, () => alphabet[crypto.randomInt(alphabet.length)]).join('');
+  return `Fleek-${pick(4)}${pick(4)}!${crypto.randomInt(100, 999)}`;
+}
+
+/**
+ * Approve a registration: mints a `user`-tier Active account and emails the
+ * username + temporary password via `sendMailInternal` (server-side — never
+ * through the super_admin-gated ad-hoc relay).
+ */
+app.post('/api/admin/approve-registration/:id', requirePerm('registrations.review'), wrap(async (req, res) => {
+  const actor = req.actor;
+  const reg = registrationById(req.params.id);
+  if (!reg) return bad(res, 'Registration request not found.', 404);
+  if (reg.status !== 'pending') return bad(res, `That request is already ${reg.status}.`, 409);
+  if (findUserByEmail(reg.contactEmail)) return bad(res, 'An account with that email already exists.', 409);
+
+  await sleep(220);
+  const s = settings();
+  const username = buildUsername(reg.contactEmail);
+  const temp = tempPassword();
+  const walletId = uid('wal');
+  const user = {
+    id: uid('usr'), name: reg.contactName, email: reg.contactEmail, username,
+    password: hashPassword(temp), phone: reg.contactPhone ?? '', department: reg.company ?? '',
+    jobTitle: 'Workspace Owner', tier: 'user',
+    status: 'Active', isSystem: false, mfaEnabled: false,
+    createdAt: now(), failedLoginAttempts: 0, lockedUntil: null, walletId,
+  };
+  const at = now();
+  db.exec('BEGIN');
+  try {
+    putUser(user);
+    putWallet({
+      id: walletId, userId: user.id, currency: 'KES', balance: 0, held: 0, lifetimeTopUp: 0, lifetimeSpend: 0,
+      autoTopUp: false, autoTopUpTriggerKes: s.billing?.lowBalanceAlertKes ?? 5000, autoTopUpAmountKes: 10000,
+      lowBalanceAlertKes: s.billing?.lowBalanceAlertKes ?? 5000, overdraftAllowed: !!s.billing?.overdraftAllowed,
+      updatedAt: at,
+    });
+    putRegistration({ ...reg, status: 'approved', decidedAt: at, decidedBy: actor.name, createdUserId: user.id });
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  appendAudit({
+    actorId: actor.id, actorName: actor.name, actorTier: actor.tier, action: 'registration.approved',
+    entity: 'PendingRegistration', entityId: reg.id, severity: 'critical', ip: clientIp(req),
+    detail: `Approved ${reg.company} — account ${username} <${reg.contactEmail}> created`,
+  });
+  await mailer.sendMailInternal({
+    to: reg.contactEmail,
+    subject: 'Welcome to Fleek IPRS — your account is approved',
+    template: 'fleek-iprs-registration-approved',
+    vars: { name: reg.contactName, company: reg.company, username, tempPassword: temp },
+  });
+  res.status(201).json({ ok: true, user: publicUser(user), username, tempPassword: temp });
+}));
+
+/**
+ * Reject a registration with a reason. No applicant email: the five
+ * `fleek-iprs-*` mail templates (Task 3 contract) include no rejection
+ * template, so the decision is recorded in the queue + audit trail where the
+ * reviewer quotes it back to the applicant.
+ */
+app.post('/api/admin/reject-registration/:id', requirePerm('registrations.review'), wrap((req, res) => {
+  const actor = req.actor;
+  const reg = registrationById(req.params.id);
+  if (!reg) return bad(res, 'Registration request not found.', 404);
+  if (reg.status !== 'pending') return bad(res, `That request is already ${reg.status}.`, 409);
+  const reason = String(req.body?.reason ?? '').trim();
+  if (!reason) return bad(res, 'Give a reason — the applicant sees it.');
+  const at = now();
+  putRegistration({ ...reg, status: 'rejected', decidedAt: at, decidedBy: actor.name, rejectionReason: reason });
+  appendAudit({
+    actorId: actor.id, actorName: actor.name, actorTier: actor.tier, action: 'registration.rejected',
+    entity: 'PendingRegistration', entityId: reg.id, severity: 'warning', ip: clientIp(req),
+    detail: `Rejected ${reg.company} <${reg.contactEmail}> — ${reason}`,
+  });
+  res.json({ ok: true, message: `Registration for ${reg.company} rejected.` });
 }));
 
 /* ---------------------------------- users --------------------------------- */
@@ -1200,6 +1398,8 @@ app.get('/api', wrap((_req, res) => {
       'GET  /api/health', 'POST /api/auth/login', 'POST /api/auth/logout', 'GET  /api/auth/me',
       'GET  /api/users', 'POST /api/users', 'GET  /api/users/:id', 'PATCH /api/users/:id',
       'DELETE /api/users/:id', 'POST /api/users/:id/reset-password',
+      'POST /api/auth/register', 'GET  /api/registrations',
+      'POST /api/admin/approve-registration/:id', 'POST /api/admin/reject-registration/:id',
       'GET  /api/wallet', 'GET  /api/wallet/transactions', 'PATCH /api/wallet/:id',
       'POST /api/wallet/topup/mpesa/stk', 'GET  /api/wallet/topup/mpesa/stk/:checkoutRequestID',
       'POST /api/wallet/topup/mpesa/confirm', 'POST /api/wallet/topup/mpesa/cancel',

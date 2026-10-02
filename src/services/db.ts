@@ -12,6 +12,7 @@ import type {
   NotificationPreferences,
   PaymentMethod,
   PaymentRecord,
+  PendingRegistration,
   ProviderConfig,
   ProviderRequestLog,
   QuotaState,
@@ -62,6 +63,8 @@ export interface DbState {
   users: SystemUser[];
   sessions: SessionRecord[];
   audit: AuditEntry[];
+  /** Public registration requests awaiting Super Admin review (LOCAL mirror). */
+  pendingRegistrations: PendingRegistration[];
 
   /* notifications */
   notifications: NotificationItem[];
@@ -143,6 +146,7 @@ function freshState(): DbState {
     users: seedUsers.map((u) => ({ ...u })),
     sessions: seedSessions.map((s) => ({ ...s })),
     audit: seedAudit.map((a) => ({ ...a })),
+    pendingRegistrations: [],
     notifications: notificationsData.map((n) => ({ ...n })),
     notificationPrefs: {},
     cases: casesData.map((c) => ({ ...c })),
