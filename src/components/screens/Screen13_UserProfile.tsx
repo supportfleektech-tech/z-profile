@@ -14,7 +14,7 @@ import { authService } from '../../services/auth.service';
 import { billingService } from '../../services/billing.service';
 import { scorePassword, formatDate, timeAgo, KES } from '../../lib/format';
 import { TIER_META, effectivePermissions, roleLabelFor, PERMISSION_LABELS, PERMISSION_GROUPS } from '../../auth/permissions';
-import type { ApiKeyRecord, NotificationChannel, NotificationEvent, SessionRecord, Permission, SystemUser } from '../../types';
+import type { ApiKeyRecord, NotificationChannel, NotificationEvent, SessionRecord, Permission, SystemUser, ThemeMode } from '../../types';
 import { SUB_USER_FREE_LIMIT, SUB_USER_PRICE_KES } from '../../types';
 
 const TABS = ['Profile', 'Security', 'Notifications', 'Appearance', 'API Keys', 'Team Members'] as const;
@@ -39,6 +39,12 @@ const CHANNELS: { id: NotificationChannel; label: string }[] = [
   { id: 'email', label: 'Email' },
   { id: 'sms', label: 'SMS' },
   { id: 'webhook', label: 'Webhook' },
+];
+
+const THEME_MODES: { id: ThemeMode; label: string; description: string }[] = [
+  { id: 'light', label: 'Light', description: 'Always use light theme' },
+  { id: 'dark', label: 'Dark', description: 'Always use dark theme' },
+  { id: 'system', label: 'System', description: 'Match OS preference' },
 ];
 
 const ACCENTS: { id: 'cyan' | 'emerald' | 'violet' | 'amber' | 'rose'; label: string; hex: string }[] = [
@@ -641,13 +647,37 @@ export const Screen13_UserProfile: React.FC = () => {
             <Panel title="Theme" subtitle="Applied instantly via CSS custom properties" icon={<Palette size={14} className="text-cyan-400" />}>
               <div className="space-y-4">
                 <div>
+                  <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-2">Theme mode</div>
+                  <div className="flex flex-wrap gap-2">
+                    {THEME_MODES.map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => setAppearance({ themeMode: t.id })}
+                        className={`flex flex-col items-start gap-1 rounded-lg border px-3 py-2.5 transition-colors min-w-[120px] ${
+                          appearance.themeMode === t.id
+                            ? 'border-cyan-600/70 bg-cyan-950/40'
+                            : 'border-sky-900/60 bg-[#061020] hover:border-sky-700'
+                        }`}
+                      >
+                        <span className="text-[11px] font-semibold text-white">{t.label}</span>
+                        <span className="text-[9px] text-slate-500">{t.description}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
                   <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-2">Accent colour</div>
                   <div className="flex flex-wrap gap-2">
                     {ACCENTS.map((a) => (
                       <button
                         key={a.id}
                         onClick={() => setAppearance({ accent: a.id })}
-                        className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 transition-colors ${appearance.accent === a.id ? 'border-cyan-600/70 bg-cyan-950/40' : 'border-sky-900/60 bg-[#061020] hover:border-sky-700'}`}
+                        className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 transition-colors ${
+                          appearance.accent === a.id
+                            ? 'border-cyan-600/70 bg-cyan-950/40'
+                            : 'border-sky-900/60 bg-[#061020] hover:border-sky-700'
+                        }`}
                       >
                         <span className="w-4 h-4 rounded-full" style={{ background: a.hex }} />
                         <span className="text-[11px] text-slate-200">{a.label}</span>
@@ -673,21 +703,21 @@ export const Screen13_UserProfile: React.FC = () => {
                 <Toggle checked={appearance.monoNumerals} onChange={(v) => setAppearance({ monoNumerals: v })} label="Tabular numerals" description="Aligns digits in tables and ledgers" />
                 <Toggle checked={appearance.sidebarCollapsed} onChange={(v) => setAppearance({ sidebarCollapsed: v })} label="Collapse sidebar by default" />
 
-                <Button size="sm" variant="ghost" icon={<RefreshCw size={12} />} onClick={() => setAppearance({ accent: 'cyan', density: 'comfortable', fontScale: 1, reduceMotion: false, monoNumerals: true, sidebarCollapsed: false })}>
+                <Button size="sm" variant="ghost" icon={<RefreshCw size={12} />} onClick={() => setAppearance({ themeMode: 'system', accent: 'cyan', density: 'comfortable', fontScale: 1, reduceMotion: false, monoNumerals: true, sidebarCollapsed: false })}>
                   Reset appearance
                 </Button>
               </div>
             </Panel>
 
             <Panel title="Preview" icon={<Eye size={14} className="text-cyan-400" />}>
-              <div className="rounded-xl border border-sky-900/50 bg-[#050b14] p-3 space-y-3">
+              <div className="rounded-xl border border-sky-900/50 bg-[var(--bg-card)] p-3 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-white">Sample ledger row</span>
+                  <span className="text-[11px] font-bold text-[var(--text-primary)]">Sample ledger row</span>
                   <Badge tone="success">Success</Badge>
                 </div>
                 <div className="flex items-center gap-2 text-[11px]">
                   <span className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--accent)' }} />
-                  <span className="text-slate-400">Wallet top-up</span>
+                  <span className="text-[var(--text-secondary)]">Wallet top-up</span>
                   <span className="ml-auto font-mono" style={{ color: 'var(--accent)' }}>+{KES(5000, { decimals: false })}</span>
                 </div>
                 <ProgressBar value={62} max={100} label="Quota" right="62%" />
@@ -700,7 +730,7 @@ export const Screen13_UserProfile: React.FC = () => {
                   ))}
                 </div>
                 <Button size="sm" variant="primary" className="w-full justify-center">Primary action</Button>
-                <p className="text-[10px] text-slate-600 leading-relaxed">
+                <p className="text-[10px] text-[var(--text-muted)] leading-relaxed">
                   Body copy at {Math.round(appearance.fontScale * 100)}% scale with {appearance.density} density.
                   {appearance.reduceMotion && ' Motion is reduced.'}
                 </p>

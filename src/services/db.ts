@@ -131,6 +131,7 @@ export const defaultNotificationPrefs: NotificationPreferences = {
 };
 
 export const defaultAppearance: AppearanceSettings = {
+  themeMode: 'system',
   accent: 'cyan',
   density: 'comfortable',
   fontScale: 1,
@@ -201,6 +202,13 @@ function load(): DbState {
       return u;
     });
   }
+
+  // Theme system migration: add themeMode to persisted appearance if missing.
+  if (merged.appearance && typeof merged.appearance === 'object' && !('themeMode' in merged.appearance)) {
+    const current = merged.appearance as Partial<AppearanceSettings>;
+    merged.appearance = { ...current, themeMode: 'system' } as AppearanceSettings;
+  }
+
   return merged;
 }
 

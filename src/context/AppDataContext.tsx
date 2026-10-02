@@ -309,6 +309,28 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     root.classList.toggle('density-comfortable', a.density === 'comfortable');
     root.classList.toggle('reduce-motion', a.reduceMotion);
     setSidebarCollapsed(a.sidebarCollapsed);
+
+    // Apply theme mode
+    const applyThemeMode = (mode: AppearanceSettings['themeMode']) => {
+      if (mode === 'system') {
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        root.dataset.themeMode = prefersDark ? 'dark' : 'light';
+      } else {
+        root.dataset.themeMode = mode;
+      }
+    };
+
+    applyThemeMode(a.themeMode);
+
+    // Listen for system theme changes when themeMode is 'system'
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = () => {
+      if (db.appearance.themeMode === 'system') {
+        applyThemeMode('system');
+      }
+    };
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
   }, [db.appearance]);
 
   const permissions = useMemo(() => (effectiveUser ? effectivePermissions(effectiveUser) : new Set<Permission>()), [effectiveUser]);

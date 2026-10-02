@@ -1060,7 +1060,10 @@ export interface NotificationPreferences {
  * Appearance
  * ------------------------------------------------------------------ */
 
+export type ThemeMode = 'light' | 'dark' | 'system';
+
 export interface AppearanceSettings {
+  themeMode: ThemeMode;
   accent: 'cyan' | 'emerald' | 'violet' | 'amber' | 'rose';
   density: 'compact' | 'comfortable';
   fontScale: number;
