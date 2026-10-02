@@ -55,10 +55,15 @@ export interface NotificationItem {
  * Identity & roles
  * ------------------------------------------------------------------ */
 
-/** The three dashboard experiences. Mutually exclusive. */
+/** The three dashboard experiences. Mutually exclusive. No sub-roles. */
 export type RoleTier = 'user' | 'admin' | 'super_admin';
 
-/** Sub-roles that scope what a `user`-tier account may do. */
+/**
+ * Legacy only. Sub-roles (analyst/officer/viewer/billing) were removed in the
+ * 3-tier restructure — every `user`-tier account now holds the full operational
+ * workspace. The type stays so persisted `iprs.v1.workspace` snapshots and old
+ * API payloads still parse; the permission engine ignores it entirely.
+ */
 export type UserSubRole = 'analyst' | 'officer' | 'viewer' | 'billing';
 
 export type Permission =
@@ -119,8 +124,12 @@ export interface SystemUser {
   department: string;
   jobTitle: string;
   tier: RoleTier;
-  /** Meaningful only when tier === 'user'. */
-  subRole: UserSubRole;
+  /**
+   * Legacy only — sub-roles were removed in the 3-tier restructure. Persisted
+   * snapshots may still carry one; `db.ts` strips it on load and the permission
+   * engine never reads it.
+   */
+  subRole?: UserSubRole;
   status: 'Active' | 'Inactive' | 'Suspended';
   /** Seeded accounts cannot be edited, deactivated or deleted from any UI. */
   isSystem: boolean;
@@ -153,6 +162,7 @@ export interface RoleDefinition {
 }
 
 export interface SubRoleDefinition {
+  /** Legacy only — the sub-role preset catalogue was removed with the 3-tier restructure. */
   id: UserSubRole;
   label: string;
   description: string;

@@ -10,12 +10,12 @@ import {
   ResponsiveTable, SearchInput, Select, Tabs, TextInput, Toggle, type Column,
 } from '../ui';
 import {
-  PERMISSION_GROUPS, PERMISSION_LABELS, ROLE_DEFINITIONS, SUB_ROLE_DEFINITIONS, TIER_META, TIER_ORDER,
-  canCreateTier, canManageUser, effectivePermissions, roleLabelFor, subRoleDefinition,
+  PERMISSION_GROUPS, PERMISSION_LABELS, ROLE_DEFINITIONS, TIER_META, TIER_ORDER,
+  canCreateTier, canManageUser, effectivePermissions, roleLabelFor,
 } from '../../auth/permissions';
 import { downloadText, formatDate, maskSecret, timeAgo, toCsv } from '../../lib/format';
 import { DEMO_PASSWORD } from '../../data/users';
-import type { AuditEntry, Permission, RoleTier, SessionRecord, SystemUser, UserSubRole } from '../../types';
+import type { AuditEntry, Permission, RoleTier, SessionRecord, SystemUser } from '../../types';
 
 const TABS = ['Users', 'Roles & Permissions', 'Sessions', 'Audit', 'Organisation'] as const;
 type Tab = (typeof TABS)[number];
@@ -56,7 +56,6 @@ export const Screen9_AdminConsole: React.FC = () => {
     department: 'Operations',
     jobTitle: '',
     tier: 'user' as RoleTier,
-    subRole: 'analyst' as UserSubRole,
     password: '',
     mfaEnabled: false,
   };
@@ -102,10 +101,9 @@ export const Screen9_AdminConsole: React.FC = () => {
       render: (u) => (
         <div className="flex flex-col gap-0.5">
           {tierBadge(u.tier)}
-          {u.tier === 'user' && <span className="text-[9px] text-slate-500">{subRoleDefinition(u.subRole).label}</span>}
         </div>
       ),
-      renderMobile: (u) => `${TIER_META[u.tier].label}${u.tier === 'user' ? ` · ${subRoleDefinition(u.subRole).label}` : ''}`,
+      renderMobile: (u) => `${TIER_META[u.tier].label}`,
       sortValue: (u) => u.tier,
     },
     { key: 'dept', header: 'Department', render: (u) => <span className="text-[11px] text-slate-300">{u.department}</span>, className: 'hidden lg:table-cell', sortValue: (u) => u.department },
@@ -270,7 +268,6 @@ export const Screen9_AdminConsole: React.FC = () => {
       department: form.department,
       jobTitle: form.jobTitle.trim(),
       tier: form.tier,
-      subRole: form.tier === 'user' ? form.subRole : 'analyst',
       password: form.password.trim() || DEMO_PASSWORD,
     });
     if (res.ok) {
@@ -330,7 +327,7 @@ export const Screen9_AdminConsole: React.FC = () => {
               <ul className="list-disc pl-4 space-y-0.5 text-[11px]">
                 <li><strong>Super Admin</strong> is seeded with the platform. It cannot be created, edited, suspended or removed from any interface.</li>
                 <li><strong>Admin</strong> accounts can only be created by a Super Admin{currentUser?.tier === 'super_admin' ? ' — which is you.' : '.'}</li>
-                <li><strong>User</strong> accounts can be created by Admins and the Super Admin, then given an Analyst, Officer, Viewer or Billing sub-role.</li>
+                <li><strong>User</strong> accounts can be created by Admins and the Super Admin. Every user holds the full operational workspace — searches, cases, reports and their own wallet.</li>
               </ul>
             </Callout>
 
@@ -415,29 +412,8 @@ export const Screen9_AdminConsole: React.FC = () => {
             </div>
 
             <Panel
-              title="Sub-roles within the User tier"
-              subtitle="Analyst, Officer, Viewer and Billing are permission presets applied to User-tier accounts"
-              icon={<KeyRound size={14} className="text-cyan-400" />}
-            >
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                {SUB_ROLE_DEFINITIONS.map((s) => (
-                  <div key={s.id} className="rounded-lg border border-sky-900/50 bg-[#061020] p-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-bold text-white">{s.label}</span>
-                      <span className="text-[9px] font-mono text-cyan-400">{s.permissions.length} perms</span>
-                    </div>
-                    <p className="text-[10px] text-slate-500 mt-1 leading-snug">{s.description}</p>
-                    <div className="mt-1.5 text-[9px] text-slate-600">
-                      {users.filter((u) => u.tier === 'user' && u.subRole === s.id).length} account(s) assigned
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Panel>
-
-            <Panel
               title="Permission matrix"
-              subtitle="Effective permissions per tier and User sub-role"
+              subtitle="Effective permissions per tier"
               icon={<ShieldCheck size={14} className="text-cyan-400" />}
               actions={
                 !can('roles.edit') && (
@@ -452,9 +428,7 @@ export const Screen9_AdminConsole: React.FC = () => {
                   <thead className="bg-[#08172b] sticky top-0">
                     <tr>
                       <th className="text-left px-2 py-2 font-bold text-slate-400 uppercase tracking-wider text-[9px] min-w-[180px]">Permission</th>
-                      {SUB_ROLE_DEFINITIONS.map((s) => (
-                        <th key={s.id} className="px-2 py-2 font-bold text-sky-300 text-center whitespace-nowrap">{s.label}<span className="block text-[8px] font-normal text-slate-600">User</span></th>
-                      ))}
+                      <th className="px-2 py-2 font-bold text-sky-300 text-center whitespace-nowrap">User</th>
                       <th className="px-2 py-2 font-bold text-violet-300 text-center whitespace-nowrap">Admin</th>
                       <th className="px-2 py-2 font-bold text-amber-300 text-center whitespace-nowrap">Super Admin</th>
                     </tr>
@@ -463,7 +437,7 @@ export const Screen9_AdminConsole: React.FC = () => {
                     {PERMISSION_GROUPS.map((g) => (
                       <React.Fragment key={g.label}>
                         <tr className="bg-[#071322]">
-                          <td colSpan={7} className="px-2 py-1.5 text-[9px] font-bold uppercase tracking-wider text-cyan-400/80">{g.label}</td>
+                          <td colSpan={4} className="px-2 py-1.5 text-[9px] font-bold uppercase tracking-wider text-cyan-400/80">{g.label}</td>
                         </tr>
                         {g.permissions.map((p: Permission) => (
                           <tr key={p} className="border-t border-sky-950/60 hover:bg-sky-950/30">
@@ -471,9 +445,7 @@ export const Screen9_AdminConsole: React.FC = () => {
                               <span className="block">{PERMISSION_LABELS[p]}</span>
                               <span className="block font-mono text-[9px] text-slate-600">{p}</span>
                             </td>
-                            {SUB_ROLE_DEFINITIONS.map((s) => (
-                              <Cell key={s.id} on={s.permissions.includes(p)} />
-                            ))}
+                            <Cell on={(ROLE_DEFINITIONS.find((r) => r.tier === 'user')?.permissions ?? []).includes(p)} />
                             <Cell on={(ROLE_DEFINITIONS.find((r) => r.tier === 'admin')?.permissions ?? []).includes(p)} />
                             <Cell on={(ROLE_DEFINITIONS.find((r) => r.tier === 'super_admin')?.permissions ?? []).includes(p)} />
                           </tr>
@@ -582,15 +554,6 @@ export const Screen9_AdminConsole: React.FC = () => {
                 }))}
               />
             </Field>
-            {form.tier === 'user' && (
-              <Field label="Sub-role" hint={subRoleDefinition(form.subRole).description}>
-                <Select
-                  value={form.subRole}
-                  onChange={(e) => setForm({ ...form, subRole: e.target.value as UserSubRole })}
-                  options={SUB_ROLE_DEFINITIONS.map((s) => ({ value: s.id, label: s.label }))}
-                />
-              </Field>
-            )}
             <Field label="Temporary password" hint={`Left blank → ${DEMO_PASSWORD}`}>
               <TextInput value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={DEMO_PASSWORD} className="font-mono" />
             </Field>
@@ -632,7 +595,6 @@ export const Screen9_AdminConsole: React.FC = () => {
                     phone: editing.phone,
                     department: editing.department,
                     jobTitle: editing.jobTitle,
-                    subRole: editing.subRole,
                     mfaEnabled: editing.mfaEnabled,
                     permissionOverrides: editing.permissionOverrides,
                     ipAllowlist: editing.ipAllowlist,
@@ -701,16 +663,6 @@ export const Screen9_AdminConsole: React.FC = () => {
                   options={['Operations', 'Compliance', 'Finance', 'IT & Security', 'Executive', 'Customer Success'].map((d) => ({ value: d, label: d }))}
                 />
               </Field>
-              {editing.tier === 'user' && (
-                <Field label="Sub-role" hint={subRoleDefinition(editing.subRole).description}>
-                  <Select
-                    value={editing.subRole}
-                    disabled={editing.isSystem || !can('users.edit')}
-                    onChange={(e) => setEditing({ ...editing, subRole: e.target.value as UserSubRole })}
-                    options={SUB_ROLE_DEFINITIONS.map((s) => ({ value: s.id, label: s.label }))}
-                  />
-                </Field>
-              )}
             </div>
 
             <Toggle

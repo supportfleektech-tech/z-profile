@@ -178,6 +178,19 @@ function load(): DbState {
   if (!merged.settings?.security?.passwordPolicy) merged.settings = base.settings;
   if (!merged.pricing?.items?.length) merged.pricing = base.pricing;
   if (!merged.activeDossier?.sections?.length) merged.activeDossier = base.activeDossier;
+  // 3-tier restructure: persisted snapshots may still carry a legacy `subRole`
+  // (analyst/officer/viewer/billing). Every one of them maps to the plain user
+  // tier, so the key is simply dropped — the engine never reads it.
+  if (Array.isArray(merged.users)) {
+    merged.users = merged.users.map((u) => {
+      if (u && typeof u === 'object' && 'subRole' in u) {
+        const next = { ...u };
+        delete next.subRole;
+        return next;
+      }
+      return u;
+    });
+  }
   return merged;
 }
 

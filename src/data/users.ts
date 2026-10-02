@@ -1,7 +1,10 @@
 import type { SystemUser } from '../types';
 
 /**
- * Seeded accounts.
+ * Seeded accounts — the 3-tier model: one seeded Super Admin (system), one
+ * Admin, and plain User accounts. There are no sub-roles: every user holds the
+ * full operational workspace and cross-account scoping is enforced by the
+ * `.view.own` / `.view.all` permission split.
  *
  * The Super Admin is a **system account** (`isSystem: true`). It is created by the seed,
  * never by a UI, and cannot be edited, deactivated, role-changed or deleted. Only this
@@ -23,7 +26,6 @@ export const seedUsers: SystemUser[] = [
     department: 'Office of the Platform Owner',
     jobTitle: 'Platform Owner',
     tier: 'super_admin',
-    subRole: 'analyst',
     status: 'Active',
     isSystem: true,
     mfaEnabled: true,
@@ -43,7 +45,6 @@ export const seedUsers: SystemUser[] = [
     department: 'Platform Operations',
     jobTitle: 'Operations Administrator',
     tier: 'admin',
-    subRole: 'analyst',
     status: 'Active',
     isSystem: false,
     mfaEnabled: true,
@@ -62,7 +63,6 @@ export const seedUsers: SystemUser[] = [
     department: 'Investigations',
     jobTitle: 'Senior Verification Analyst',
     tier: 'user',
-    subRole: 'analyst',
     status: 'Active',
     isSystem: false,
     mfaEnabled: false,
@@ -82,7 +82,6 @@ export const seedUsers: SystemUser[] = [
     department: 'Compliance',
     jobTitle: 'Compliance Officer',
     tier: 'user',
-    subRole: 'officer',
     status: 'Active',
     isSystem: false,
     mfaEnabled: false,
@@ -102,7 +101,6 @@ export const seedUsers: SystemUser[] = [
     department: 'Risk & Audit',
     jobTitle: 'Risk Reviewer',
     tier: 'user',
-    subRole: 'viewer',
     status: 'Active',
     isSystem: false,
     mfaEnabled: false,
@@ -122,7 +120,6 @@ export const seedUsers: SystemUser[] = [
     department: 'Finance',
     jobTitle: 'Billing & Treasury Officer',
     tier: 'user',
-    subRole: 'billing',
     status: 'Active',
     isSystem: false,
     mfaEnabled: false,
@@ -142,7 +139,6 @@ export const seedUsers: SystemUser[] = [
     department: 'Investigations',
     jobTitle: 'Verification Analyst (contract)',
     tier: 'user',
-    subRole: 'analyst',
     status: 'Suspended',
     isSystem: false,
     mfaEnabled: false,
@@ -156,11 +152,9 @@ export const seedUsers: SystemUser[] = [
 
 export const seedCurrent = now;
 
-/** Demo personas surfaced on the login screen for instant role switching. */
+/** Demo personas surfaced on the login screen for instant role switching — one per tier. */
 export const demoPersonas = [
   { email: 'superadmin@iprs.co.ke', password: DEMO_PASSWORD, label: 'Super Admin', name: 'John Kamau', tier: 'super_admin' as const },
   { email: 'admin@iprs.co.ke', password: DEMO_PASSWORD, label: 'Admin', name: 'David Mbugua', tier: 'admin' as const },
-  { email: 'analyst@iprs.co.ke', password: DEMO_PASSWORD, label: 'User · Analyst', name: 'Sarah Wanjiku', tier: 'user' as const },
-  { email: 'officer@iprs.co.ke', password: DEMO_PASSWORD, label: 'User · Officer', name: 'Mike Ochieng', tier: 'user' as const },
-  { email: 'billing@iprs.co.ke', password: DEMO_PASSWORD, label: 'User · Billing', name: 'Achieng Otieno', tier: 'user' as const },
+  { email: 'analyst@iprs.co.ke', password: DEMO_PASSWORD, label: 'User', name: 'Sarah Wanjiku', tier: 'user' as const },
 ];

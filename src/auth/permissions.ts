@@ -1,15 +1,24 @@
-import type { Permission, RoleDefinition, RoleTier, SubRoleDefinition, SystemUser, UserSubRole } from '../types';
+import type { Permission, RoleDefinition, RoleTier, SystemUser } from '../types';
 
 /**
- * Role-based access control.
+ * Role-based access control — the single source of truth for the 3-tier model.
  *
- * Three tiers, each with its own dashboard, navigation and toolset:
  *   - `super_admin` — seeded by the system, NEVER creatable from any UI.
- *   - `admin`       — creatable only by a `super_admin`.
- *   - `user`        — creatable by `admin` or `super_admin`; scoped further by sub-role.
+ *   - `admin`       — creatable only by a `super_admin`. Organisation-wide
+ *                     operations: team, providers, payments, operational settings.
+ *                     (The old analyst + billing seats merged into this one tier.)
+ *   - `user`        — creatable by `admin` or `super_admin`. Full operational
+ *                     workspace: searches, cases, reports and their own wallet.
+ *                     There are NO sub-roles.
  *
- * `can()` is the single source of truth. It is consulted by the nav, the router guard and
- * the service layer, so hiding a button is never the only control.
+ * `can()` is the single source of truth. It is consulted by the nav, the router
+ * guard, the service layer AND the backend (`server/index.mjs` → `requirePerm()`),
+ * so hiding a button is never the only control. Never duplicate role logic —
+ * extend this engine instead.
+ *
+ * EXTENDING (append, never restructure): to add a permission, add its label to
+ * `PERMISSION_LABELS`, list it in the matching `PERMISSION_GROUPS` entry, then
+ * grant it in the relevant `ROLE_DEFINITIONS` entry below.
  */
 
 export const PERMISSION_LABELS: Record<Permission, string> = {
@@ -79,7 +88,34 @@ export const PERMISSION_GROUPS: { label: string; permissions: Permission[] }[] =
   },
 ];
 
-const OPERATIONS: Permission[] = [
+/**
+ * Plain User — the full operational workspace. Every account runs its own
+ * searches, cases, reports and wallet; scoping across accounts is enforced by
+ * the `.view.own` / `.view.all` split, not by sub-roles.
+ */
+const USER_PERMISSIONS: Permission[] = [
+  'search.run',
+  'search.view.own',
+  'case.create',
+  'case.update',
+  'case.view.own',
+  'report.view',
+  'report.export',
+  'wallet.view.own',
+  'wallet.topup',
+  'billing.view',
+  'pricing.view',
+  'providers.view',
+  'profile.manage',
+];
+
+/**
+ * Admin — the old analyst + billing seats merged, plus organisation-wide
+ * operations (team, payments, providers, sessions, audit, analytics and the
+ * operational settings group). Security/compliance/platform policy stays
+ * Super Admin only.
+ */
+const ADMIN_PERMISSIONS: Permission[] = [
   'search.run',
   'search.view.all',
   'case.create',
@@ -117,30 +153,18 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     tier: 'user',
     label: 'User',
     description:
-      'Operational workspace. Runs searches, manages their own cases and reports, and tops up their own wallet.',
+      'Operational workspace. Runs searches, manages cases and reports, and tops up their own wallet.',
     dashboard: 'User Workspace',
-    permissions: [
-      'search.run',
-      'search.view.own',
-      'case.view.own',
-      'report.view',
-      'report.export',
-      'wallet.view.own',
-      'wallet.topup',
-      'billing.view',
-      'pricing.view',
-      'providers.view',
-      'profile.manage',
-    ],
+    permissions: USER_PERMISSIONS,
     creatableBy: ['admin', 'super_admin'],
   },
   {
     tier: 'admin',
     label: 'Admin',
     description:
-      'Organisation administrator. Manages the team, provider gateways, payments and operational settings across the whole workspace.',
+      'Organisation administrator. Runs investigations, manages the team, provider gateways, payments and operational settings across the whole workspace.',
     dashboard: 'Admin Dashboard',
-    permissions: OPERATIONS,
+    permissions: ADMIN_PERMISSIONS,
     /** Only a Super Admin may mint another Admin. */
     creatableBy: ['super_admin'],
   },
@@ -153,77 +177,6 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     permissions: Object.keys(PERMISSION_LABELS) as Permission[],
     systemOnly: true,
     creatableBy: [],
-  },
-];
-
-export const SUB_ROLE_DEFINITIONS: SubRoleDefinition[] = [
-  {
-    id: 'analyst',
-    label: 'Analyst',
-    description: 'Full investigative access — runs searches, opens and works cases, exports reports.',
-    permissions: [
-      'search.run',
-      'search.view.own',
-      'case.create',
-      'case.update',
-      'case.view.own',
-      'report.view',
-      'report.export',
-      'wallet.view.own',
-      'wallet.topup',
-      'billing.view',
-      'pricing.view',
-      'providers.view',
-      'profile.manage',
-    ],
-  },
-  {
-    id: 'officer',
-    label: 'Officer',
-    description: 'Runs searches and progresses assigned cases; cannot create new cases.',
-    permissions: [
-      'search.run',
-      'search.view.own',
-      'case.update',
-      'case.view.own',
-      'report.view',
-      'wallet.view.own',
-      'billing.view',
-      'pricing.view',
-      'providers.view',
-      'profile.manage',
-    ],
-  },
-  {
-    id: 'viewer',
-    label: 'Viewer',
-    description: 'Read-only. Can view completed reports and cases but cannot run new searches.',
-    permissions: [
-      'search.view.own',
-      'case.view.own',
-      'report.view',
-      'wallet.view.own',
-      'billing.view',
-      'pricing.view',
-      'providers.view',
-      'profile.manage',
-    ],
-  },
-  {
-    id: 'billing',
-    label: 'Billing',
-    description: 'Finance seat. Manages invoices, wallet top-ups, pricing views and payment records.',
-    permissions: [
-      'wallet.view.own',
-      'wallet.topup',
-      'billing.view',
-      'pricing.view',
-      'report.view',
-      'search.view.own',
-      'case.view.own',
-      'providers.view',
-      'profile.manage',
-    ],
   },
 ];
 
@@ -273,10 +226,6 @@ export function roleDefinition(tier: RoleTier): RoleDefinition {
   return ROLE_DEFINITIONS.find((r) => r.tier === tier) ?? ROLE_DEFINITIONS[0];
 }
 
-export function subRoleDefinition(sub: UserSubRole): SubRoleDefinition {
-  return SUB_ROLE_DEFINITIONS.find((s) => s.id === sub) ?? SUB_ROLE_DEFINITIONS[0];
-}
-
 /**
  * Scope implication: holding an org-wide `.view.all` always satisfies the narrower
  * `.view.own` for the same resource.
@@ -298,12 +247,9 @@ function applyImplications(set: Set<Permission>): void {
   }
 }
 
-/** Effective permission set for an account, after sub-role scoping and per-user overrides. */
+/** Effective permission set for an account: tier defaults plus per-user overrides. */
 export function effectivePermissions(user: SystemUser): Set<Permission> {
-  const base =
-    user.tier === 'user'
-      ? new Set<Permission>(subRoleDefinition(user.subRole).permissions)
-      : new Set<Permission>(roleDefinition(user.tier).permissions);
+  const base = new Set<Permission>(roleDefinition(user.tier).permissions);
 
   const out = new Set<Permission>(base);
   // Super Admin is never down-scoped — it is the system owner account.
@@ -311,6 +257,8 @@ export function effectivePermissions(user: SystemUser): Set<Permission> {
     (Object.keys(PERMISSION_LABELS) as Permission[]).forEach((p) => out.add(p));
     return out;
   }
+  // EXTENSION POINT (sub-user system): intersect `out` with the host-granted
+  // feature set here — append that step without restructuring the flow below.
   for (const [key, value] of Object.entries(user.permissionOverrides ?? {})) {
     const perm = key as Permission;
     if (value) out.add(perm);
@@ -360,26 +308,25 @@ export function dashboardLabelFor(user: SystemUser | null | undefined): string {
   return TIER_DASHBOARDS[user.tier];
 }
 
-/** Legacy 5-role label → tier, used when migrating older persisted state. */
-export function legacyRoleToTier(role: string): { tier: RoleTier; subRole: UserSubRole } {
-  switch (role) {
-    case 'Super Admin':
-      return { tier: 'super_admin', subRole: 'analyst' };
-    case 'Analyst':
-      return { tier: 'user', subRole: 'analyst' };
-    case 'Officer':
-      return { tier: 'user', subRole: 'officer' };
-    case 'Viewer':
-      return { tier: 'user', subRole: 'viewer' };
-    case 'Billing':
-      return { tier: 'user', subRole: 'billing' };
+/**
+ * Legacy label → tier, used when migrating older persisted state.
+ *
+ * Accepts both the old 5-role display labels ('Analyst', 'Officer', …) and the
+ * old sub-role ids ('analyst', 'officer', 'viewer', 'billing') — every one of
+ * them maps to the plain `user` tier. Unknown values fall back to `user`.
+ */
+export function legacyRoleToTier(role: string): RoleTier {
+  switch (role.trim().toLowerCase().replace(/[\s_-]+/g, '')) {
+    case 'superadmin':
+      return 'super_admin';
+    case 'admin':
+      return 'admin';
     default:
-      return { tier: 'user', subRole: 'viewer' };
+      return 'user';
   }
 }
 
-/** Human label for a user, e.g. "Admin" or "User · Analyst". */
+/** Human label for a user — exactly the tier label: "Admin", "Super Admin" or "User". */
 export function roleLabelFor(user: SystemUser): string {
-  if (user.tier === 'user') return `${TIER_LABELS.user} · ${subRoleDefinition(user.subRole).label}`;
   return TIER_LABELS[user.tier];
 }

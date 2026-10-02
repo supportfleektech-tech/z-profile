@@ -12,12 +12,12 @@
  * adapter does, so the audit trail is identical whichever transport is live.
  */
 
-import { effectivePermissions } from '../src/auth/permissions.ts';
+import { canCreateTier, effectivePermissions } from '../src/auth/permissions.ts';
 import { bearerOf, issueToken, verifyToken } from './auth.mjs';
 import * as daraja from './daraja.mjs';
 import * as spin from './spin.mjs';
 import { hashPassword, verifyPassword } from './passwords.mjs';
-import { hashStoredPasswords } from './db.mjs';
+import { hashStoredPasswords, dropLegacySubRoles } from './db.mjs';
 import { SPIN_MODULES, SPIN_AUTH } from '../src/data/spinModules.ts';
 import express from 'express';
 import cors from 'cors';
@@ -61,7 +61,7 @@ app.use(express.json({ limit: '2mb' }));
  */
 function publicUser(u) {
   if (!u) return u;
-  const { password: _password, passwordHash: _hash, ...rest } = u;
+  const { password: _password, passwordHash: _hash, subRole: _legacy, ...rest } = u;
   return rest;
 }
 const publicUsers = (list) => (Array.isArray(list) ? list.map(publicUser) : list);
@@ -140,9 +140,9 @@ function actorOf(req) {
 
 /* ────────────────────── authorisation helpers ──────────────────────
  * The permission engine in src/auth/permissions.ts is the single source of truth
- * (sub-roles, per-user overrides and scope implication included). These middlewares
- * make the server enforce what the UI enforces — a stolen token or a hand-rolled
- * request must not see more than the signed-in role allows.
+ * (tier defaults, per-user overrides and scope implication included). These
+ * middlewares make the server enforce what the UI enforces — a stolen token or
+ * a hand-rolled request must not see more than the signed-in role allows.
  */
 const canActor = (actor, perm) => !!actor && effectivePermissions(actor).has(perm);
 
@@ -347,7 +347,7 @@ app.post('/api/auth/login', wrap(async (req, res) => {
   appendAudit({
     actorId: updated.id, actorName: updated.name, actorTier: updated.tier, action: 'auth.login',
     entity: 'Session', severity: 'success', ip,
-    detail: `Signed in as ${updated.tier === 'user' ? `User · ${updated.subRole}` : updated.tier === 'admin' ? 'Admin' : 'Super Admin'}${requiresMfa ? ' (MFA required)' : ''}`,
+    detail: `Signed in as ${updated.tier === 'user' ? 'User' : updated.tier === 'admin' ? 'Admin' : 'Super Admin'}${requiresMfa ? ' (MFA required)' : ''}`,
   });
 
   const issued = issueToken(latestSession.id, updated.id);
@@ -391,13 +391,16 @@ app.post('/api/users', wrap(async (req, res) => {
   const actor = actorOf(req);
   const input = req.body ?? {};
   if (!actor) return bad(res, 'Not authenticated.', 401);
-  if (input.tier === 'super_admin') {
-    return res.status(403).json({ ok: false, message: 'Super Admin accounts are seeded by the system and cannot be created from the UI.' });
+  // Tier rules come from the shared engine (canCreateTier) — never duplicated here.
+  if (!canCreateTier(actor, input.tier ?? 'user')) {
+    if ((input.tier ?? 'user') === 'super_admin') {
+      return res.status(403).json({ ok: false, message: 'Super Admin accounts are seeded by the system and cannot be created from the UI.' });
+    }
+    if (input.tier === 'admin') {
+      return res.status(403).json({ ok: false, message: 'Only a Super Admin can create Admin accounts.' });
+    }
+    return res.status(403).json({ ok: false, message: 'You do not have permission to create accounts.' });
   }
-  if (input.tier === 'admin' && actor.tier !== 'super_admin') {
-    return res.status(403).json({ ok: false, message: 'Only a Super Admin can create Admin accounts.' });
-  }
-  if (actor.tier === 'user') return res.status(403).json({ ok: false, message: 'You do not have permission to create accounts.' });
   if (!input.name?.trim() || !input.email?.trim()) return bad(res, 'Name and email are required.');
   if (findUserByEmail(input.email)) return bad(res, 'An account with that email already exists.', 409);
 
@@ -407,7 +410,7 @@ app.post('/api/users', wrap(async (req, res) => {
   const user = {
     id: uid('usr'), name: input.name.trim(), email: input.email.trim().toLowerCase(),
     password: hashPassword(input.password || 'ChangeMe@123'), phone: input.phone ?? '', department: input.department ?? '',
-    jobTitle: input.jobTitle ?? '', tier: input.tier ?? 'user', subRole: input.subRole ?? 'analyst',
+    jobTitle: input.jobTitle ?? '', tier: input.tier ?? 'user',
     status: 'Active', isSystem: false,
     mfaEnabled: (s.security?.mfaRequiredFor ?? []).includes(input.tier ?? 'user'),
     createdAt: now(), failedLoginAttempts: 0, lockedUntil: null, walletId,
@@ -422,7 +425,7 @@ app.post('/api/users', wrap(async (req, res) => {
   appendAudit({
     actorId: actor.id, actorName: actor.name, actorTier: actor.tier, action: 'user.created',
     entity: 'SystemUser', entityId: user.id, severity: 'critical', ip: clientIp(req),
-    detail: `Created ${user.name} <${user.email}> as ${user.tier === 'admin' ? 'Admin' : `User · ${user.subRole}`}`,
+    detail: `Created ${user.name} <${user.email}> as ${user.tier === 'admin' ? 'Admin' : 'User'}`,
   });
   res.status(201).json({ ok: true, user: publicUser(user) });
 }));
@@ -436,6 +439,8 @@ app.patch('/api/users/:id', requirePerm('users.edit'), wrap((req, res) => {
     return res.status(403).json({ ok: false, message: 'The Super Admin account is seeded by the system and is immutable.' });
   }
   const patch = req.body ?? {};
+  // Sub-roles were removed in the 3-tier restructure — never persist one back.
+  if ('subRole' in patch) delete patch.subRole;
   // Guard the invariants even if a client tries to bypass the UI.
   if (patch.tier === 'super_admin' && !target.isSystem) {
     return res.status(403).json({ ok: false, message: 'Accounts cannot be promoted to Super Admin.' });
@@ -1178,6 +1183,7 @@ app.use('/api', (_req, res) => res.status(404).json({ ok: false, message: 'Unkno
 
 const seedResult = seedIfEmpty();
 hashStoredPasswords(); // purge any plaintext credentials (idempotent; upgrades pre-hash DBs)
+dropLegacySubRoles(); // purge legacy subRole keys (idempotent; upgrades pre-restructure DBs)
 if (seedResult.seeded) {
   console.log(`[api] seeded SQLite at ${DB_PATH}`, seedResult.counts);
 } else {

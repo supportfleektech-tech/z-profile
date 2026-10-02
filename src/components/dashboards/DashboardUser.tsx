@@ -10,9 +10,8 @@ import { KES, formatDate, timeAgo } from '../../lib/format';
 import { roleLabelFor } from '../../auth/permissions';
 
 /**
- * User Workspace — the operational dashboard for the User tier (Analyst, Officer, Viewer,
- * Billing sub-roles). Everything here is scoped to the signed-in person: their wallet,
- * their quota, their cases, their reports.
+ * User Workspace — the operational dashboard for the User tier. Everything here is
+ * scoped to the signed-in person: their wallet, their quota, their cases, their reports.
  */
 export const DashboardUser: React.FC = () => {
   const { currentUser, wallet, quota, visibleCases, searchHistory, visibleNotifications, unreadCount, can, pricing, settings } = useAppData();

@@ -23,6 +23,10 @@ export interface PageRoute {
  * `tiers` + `permission` drive three things at once: sidebar visibility, the router's
  * access guard, and the command palette — so the User, Admin and Super Admin experiences
  * genuinely differ instead of just hiding a few buttons.
+ *
+ * 3-tier model (no sub-roles): governance routes (Team & access, System settings,
+ * Audit log) and the finance monitors (Payments, Analytics) are Admin/Super Admin
+ * only; every other route is permission-gated and resolves per tier through `can()`.
  */
 export const platformRoutes: PageRoute[] = [
   {

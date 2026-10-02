@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import {
   ShieldCheck, TrendingUp, AlertTriangle, ArrowRight, Power, Terminal, Database, ScrollText,
-  Users, Server, KeyRound, Scale, Landmark, Activity, Lock,
+  Users, Server, KeyRound, Scale, Landmark, Activity, Lock, BarChart3,
 } from 'lucide-react';
 import { useAppData } from '../../context/AppDataContext';
 import { useAppRouter } from '../../context/RouterContext';
@@ -9,7 +9,7 @@ import { Badge, Button, Callout, Panel, ProgressBar, ResponsiveTable, StatCard, 
 import { settingsService } from '../../services/settings.service';
 import { KES, timeAgo } from '../../lib/format';
 import { pricingProvenance } from '../../data/pricing';
-import { PERMISSION_LABELS, ROLE_DEFINITIONS, SUB_ROLE_DEFINITIONS, TIER_META, TIER_ORDER, effectivePermissions } from '../../auth/permissions';
+import { PERMISSION_LABELS, ROLE_DEFINITIONS, TIER_META, TIER_ORDER, effectivePermissions } from '../../auth/permissions';
 import { getSnapshot } from '../../services/db';
 import type { SystemUser } from '../../types';
 
@@ -86,7 +86,7 @@ export const DashboardSuperAdmin: React.FC = () => {
       render: (u) => (
         <div className="min-w-0">
           <div className="text-[11px] font-semibold text-white truncate">{u.name}</div>
-          <div className="text-[10px] text-slate-500 truncate">{TIER_META[u.tier].label}{u.tier === 'user' ? ` · ${SUB_ROLE_DEFINITIONS.find((s) => s.id === u.subRole)?.label}` : ''}</div>
+          <div className="text-[10px] text-slate-500 truncate">{TIER_META[u.tier].label}</div>
         </div>
       ),
       sortValue: (u) => u.name,
@@ -134,6 +134,9 @@ export const DashboardSuperAdmin: React.FC = () => {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" size="sm" icon={<KeyRound size={13} />} onClick={() => navigate('/admin')}>Team &amp; access</Button>
+          <Button variant="secondary" size="sm" icon={<Server size={13} />} onClick={() => navigate('/providers')}>Providers</Button>
+          <Button variant="secondary" size="sm" icon={<Landmark size={13} />} onClick={() => navigate('/payments')}>Payments</Button>
+          <Button variant="secondary" size="sm" icon={<BarChart3 size={13} />} onClick={() => navigate('/analytics')}>Analytics</Button>
           <Button variant="secondary" size="sm" icon={<ScrollText size={13} />} onClick={() => navigate('/audit')}>Audit log</Button>
           <Button variant="primary" size="sm" icon={<Terminal size={13} />} onClick={() => navigate('/settings')}>System settings</Button>
         </div>

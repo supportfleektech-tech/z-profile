@@ -11,7 +11,7 @@ import {
 } from '../ui';
 import { authService } from '../../services/auth.service';
 import { scorePassword, formatDate, timeAgo, KES } from '../../lib/format';
-import { TIER_META, effectivePermissions, roleLabelFor, subRoleDefinition } from '../../auth/permissions';
+import { TIER_META, effectivePermissions, roleLabelFor } from '../../auth/permissions';
 import type { ApiKeyRecord, NotificationChannel, NotificationEvent, SessionRecord } from '../../types';
 
 const TABS = ['Profile', 'Security', 'Notifications', 'Appearance', 'API Keys'] as const;
@@ -216,7 +216,6 @@ export const Screen13_UserProfile: React.FC = () => {
             <div className="text-[10px] text-slate-500 truncate font-mono">{currentUser.email}</div>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
               <Badge tone={currentUser.tier === 'super_admin' ? 'warning' : currentUser.tier === 'admin' ? 'accent' : 'info'}>{tierMeta.label}</Badge>
-              <Badge tone="neutral">{roleLabelFor(currentUser)}</Badge>
               <Badge tone={currentUser.mfaEnabled ? 'success' : 'warning'} dot>{currentUser.mfaEnabled ? '2FA on' : '2FA off'}</Badge>
               {currentUser.isSystem && <Badge tone="warning">Seeded system account</Badge>}
             </div>
@@ -253,7 +252,7 @@ export const Screen13_UserProfile: React.FC = () => {
                   <Field label="Department">
                     <Select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} options={['Operations', 'Compliance', 'Finance', 'IT & Security', 'Executive', 'Customer Success'].map((d) => ({ value: d, label: d }))} />
                   </Field>
-                  <Field label="Role tier" hint="Only a Super Admin can change this"><TextInput value={`${tierMeta.label}${currentUser.tier === 'user' ? ` · ${subRoleDefinition(currentUser.subRole).label}` : ''}`} disabled /></Field>
+                  <Field label="Role tier" hint="Only a Super Admin can change this"><TextInput value={tierMeta.label} disabled /></Field>
                 </div>
                 {!profileDirty && <p className="mt-3 text-[10px] text-slate-600">No unsaved changes.</p>}
               </Panel>

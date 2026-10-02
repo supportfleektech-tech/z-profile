@@ -11,9 +11,9 @@ interface Screen6CasesProps {
  * Cases.
  *
  * Reads `visibleCases`, not the raw list: the context scopes cases to the signed-in
- * account unless it holds `case.view.all`, so a Viewer never sees another analyst's
+ * account unless it holds `case.view.all`, so a User never sees another user's
  * investigations. Create/status controls are additionally gated on `case.create` and
- * `case.update` — sub-roles that may only *read* get a read-only board.
+ * `case.update` — accounts without them get a read-only board.
  */
 export const Screen6_Cases: React.FC<Screen6CasesProps> = ({ onSelectCase }) => {
   const { visibleCases: cases, addCase, updateCaseStatus, can } = useAppData();

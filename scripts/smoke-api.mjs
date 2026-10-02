@@ -244,8 +244,8 @@ try {
   check('spin: module registry serves 24 documented Kenya modules (incl. CRB tiers)', spinMods.json?.modules?.length === 24, String(spinMods.json?.modules?.length));
   check('spin: registry carries the SuperCrunch auth contract', spinMods.json?.auth?.tokenPath === '/analytics/auth/' && spinMods.json?.auth?.tokenTtlMinutes === 10);
   check('spin: MPESAKYCCHECK module maps to the priced M-PESA check', spinMods.json?.modules?.find((m) => m.searchType === 'MPESAKYCCHECK')?.pricedItemId === 'kyc-mpesa');
-  // providers.view is deliberately held by user sub-roles (read-only visibility in the
-  // route table); configuring is what stays privileged. So: analyst reads, anon cannot.
+  // providers.view is deliberately held by the user tier (read-only visibility in
+  // the route table); configuring is what stays privileged. So: a user reads, anon cannot.
   const spinAsUser = await req('GET', '/api/spin/modules', null, null, login.json.token);
   check('spin: user tier can READ the module registry (read-only by design)', spinAsUser.status === 200, String(spinAsUser.status));
   const spinAnon = await req('GET', '/api/spin/modules', null, null, null);

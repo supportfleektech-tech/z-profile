@@ -113,7 +113,7 @@ export const authService = {
         entity: 'Session',
         severity: 'success',
         ip: opts.ip ?? '41.90.112.34',
-        detail: `Signed in as ${user.tier === 'user' ? `User · ${user.subRole}` : user.tier === 'admin' ? 'Admin' : 'Super Admin'}${requiresMfa ? ' (MFA required)' : ''}`,
+        detail: `Signed in as ${user.tier === 'user' ? 'User' : user.tier === 'admin' ? 'Admin' : 'Super Admin'}${requiresMfa ? ' (MFA required)' : ''}`,
       });
       return { ok: true, user, requiresMfa };
     };
@@ -169,7 +169,7 @@ export const authService = {
    */
   async create(
     actor: SystemUser | null,
-    input: { name: string; email: string; phone?: string; department?: string; jobTitle?: string; tier: RoleTier; subRole?: SystemUser['subRole']; password?: string }
+    input: { name: string; email: string; phone?: string; department?: string; jobTitle?: string; tier: RoleTier; password?: string }
   ): Promise<{ ok: boolean; user?: SystemUser; message?: string }> {
     const local = async () => {
       await sleep(380);
@@ -204,9 +204,8 @@ export const authService = {
         password,
         phone: input.phone?.trim() || '',
         department: input.department?.trim() || 'Operations',
-        jobTitle: input.jobTitle?.trim() || (input.tier === 'admin' ? 'Administrator' : 'Analyst'),
+        jobTitle: input.jobTitle?.trim() || (input.tier === 'admin' ? 'Administrator' : 'Team Member'),
         tier: input.tier,
-        subRole: input.tier === 'user' ? input.subRole ?? 'analyst' : 'analyst',
         status: 'Active',
         isSystem: false,
         mfaEnabled: s.settings.security.mfaRequiredFor.includes(input.tier),
@@ -245,7 +244,7 @@ export const authService = {
         entityId: user.id,
         severity: 'critical',
         ip: actor.lastLoginIp ?? '0.0.0.0',
-        detail: `Created ${user.name} <${user.email}> as ${user.tier === 'admin' ? 'Admin' : `User · ${user.subRole}`}`,
+        detail: `Created ${user.name} <${user.email}> as ${user.tier === 'admin' ? 'Admin' : 'User'}`,
       });
       return { ok: true, user };
     };
@@ -265,7 +264,9 @@ export const authService = {
       if (patch.tier === 'super_admin') return { ok: false, message: 'Accounts cannot be promoted to Super Admin.' };
       if (patch.tier === 'admin' && actor.tier !== 'super_admin') return { ok: false, message: 'Only a Super Admin may grant the Admin role.' };
       if (patch.isSystem !== undefined) return { ok: false, message: 'The system flag cannot be changed.' };
-      setState((prev) => ({ users: prev.users.map((u) => (u.id === id ? { ...u, ...patch, id: u.id, isSystem: u.isSystem } : u)) }));
+      // Sub-roles were removed in the 3-tier restructure — never persist one back.
+      const { subRole: _legacy, ...safePatch } = patch;
+      setState((prev) => ({ users: prev.users.map((u) => (u.id === id ? { ...u, ...safePatch, id: u.id, isSystem: u.isSystem } : u)) }));
       auditService.append({
         actorId: actor.id,
         actorName: actor.name,
@@ -357,7 +358,7 @@ export const authService = {
 
   /**
    * Self-service profile update. Deliberately narrower than `update()` — a user may never
-   * change their own tier, sub-role, status, system flag or password through this path.
+   * change their own tier, status, system flag or password through this path.
    */
   async updateSelf(userId: string, patch: Partial<Pick<SystemUser, 'name' | 'phone' | 'department' | 'jobTitle' | 'avatarUrl' | 'mfaEnabled' | 'ipAllowlist'>>): Promise<{ ok: boolean; message?: string }> {
     const s = getSnapshot();
@@ -442,8 +443,8 @@ export const authService = {
     return effectivePermissions(user);
   },
 
-  migrateLegacyRole(role: string): { tier: RoleTier; subRole: SystemUser['subRole'] } {
-    return legacyRoleToTier(role);
+  migrateLegacyRole(role: string): { tier: RoleTier } {
+    return { tier: legacyRoleToTier(role) };
   },
 };
 

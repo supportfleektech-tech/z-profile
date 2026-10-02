@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import {
   Shield, Users, Server, Landmark, TrendingUp, AlertTriangle, ArrowRight, Activity,
-  Wallet as WalletIcon, ScrollText, Gauge,
+  Wallet as WalletIcon, ScrollText, Gauge, BarChart3,
 } from 'lucide-react';
 import { useAppData } from '../../context/AppDataContext';
 import { useAppRouter } from '../../context/RouterContext';
@@ -13,8 +13,10 @@ import type { SystemUser, Wallet } from '../../types';
 /**
  * Admin Dashboard — organisation-wide operations.
  *
- * Team, provider health, payments and quota across every user, plus the operational
- * settings an Admin owns. Security/compliance/platform policy is visibly out of scope.
+ * The Admin tier merges the old analyst + billing seats into one role: it runs
+ * investigations, sees the team, provider health, payments and quota across every
+ * user, plus the operational settings it owns. Security/compliance/platform
+ * policy is visibly out of scope.
  */
 export const DashboardAdmin: React.FC = () => {
   const {
@@ -100,6 +102,7 @@ export const DashboardAdmin: React.FC = () => {
           <Button variant="secondary" size="sm" icon={<Users size={13} />} onClick={() => navigate('/admin')}>Team &amp; access</Button>
           <Button variant="secondary" size="sm" icon={<Server size={13} />} onClick={() => navigate('/providers')}>Providers</Button>
           <Button variant="primary" size="sm" icon={<Landmark size={13} />} onClick={() => navigate('/payments')}>Payments monitor</Button>
+          <Button variant="secondary" size="sm" icon={<BarChart3 size={13} />} onClick={() => navigate('/analytics')}>Analytics</Button>
         </div>
       </div>
 

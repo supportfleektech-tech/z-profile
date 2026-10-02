@@ -294,6 +294,24 @@ export function hashStoredPasswords() {
   return migrated;
 }
 
+/**
+ * Drop legacy `subRole` values from stored user docs. Sub-roles
+ * (analyst/officer/viewer/billing) were removed in the 3-tier restructure — the
+ * permission engine never reads the key, so it is purged from both the JSON doc
+ * and the dead `sub_role` column. Idempotent; upgrades pre-restructure DBs.
+ */
+export function dropLegacySubRoles() {
+  let purged = 0;
+  for (const u of users()) {
+    if (u && typeof u === 'object' && 'subRole' in u) {
+      const next = { ...u };
+      delete next.subRole;
+      putUser(next);
+      purged++;
+    }
+  }
+  return purged;
+}
 export function putUser(u) {
   db.prepare(
     `INSERT INTO users (id,name,email,password,phone,department,job_title,tier,sub_role,status,is_system,
@@ -309,7 +327,7 @@ export function putUser(u) {
       locked_until=@locked_until,wallet_id=@wallet_id,overrides=@overrides,ip_allowlist=@ip_allowlist,doc=@doc`
   ).run({
     id: u.id, name: u.name, email: u.email, password: u.password, phone: u.phone ?? '',
-    department: u.department ?? '', job_title: u.jobTitle ?? '', tier: u.tier, sub_role: u.subRole ?? 'analyst',
+    department: u.department ?? '', job_title: u.jobTitle ?? '', tier: u.tier, sub_role: u.subRole ?? null,
     status: u.status, is_system: u.isSystem ? 1 : 0, mfa_enabled: u.mfaEnabled ? 1 : 0,
     avatar_url: u.avatarUrl ?? null, created_at: u.createdAt, last_login_at: u.lastLoginAt ?? null,
     last_login_ip: u.lastLoginIp ?? null, failed_logins: u.failedLoginAttempts ?? 0,

@@ -141,16 +141,10 @@ const PERSONAS = [
     denied: [],
   },
   {
-    email: 'analyst@iprs.co.ke', label: 'User · Analyst',
+    email: 'analyst@iprs.co.ke', label: 'User',
     expect: /Workspace|Good (morning|afternoon|evening)/i,
     routes: ['/dashboard', '/search', '/cases', '/wallet', '/billing', '/pricing', '/providers', '/api-docs', '/notifications', '/profile', '/identity-profile', '/report'],
     denied: ['/admin', '/settings', '/audit', '/payments', '/analytics'],
-  },
-  {
-    email: 'viewer@iprs.co.ke', label: 'User · Viewer',
-    expect: /Workspace|Good (morning|afternoon|evening)/i,
-    routes: ['/dashboard', '/cases', '/wallet', '/billing', '/pricing', '/notifications', '/profile', '/identity-profile', '/report'],
-    denied: ['/search', '/admin', '/settings', '/audit', '/payments'],
   },
 ];
 
