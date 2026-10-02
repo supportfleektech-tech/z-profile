@@ -48,6 +48,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'registrations.review': 'Review registration requests',
   'users.create': 'Create user accounts',
   'users.create.admin': 'Create admin accounts',
+  'users.create.sub': 'Create sub-user seats',
+  'users.manage.sub': 'Manage sub-user seats',
   'users.edit': 'Edit accounts & roles',
   'users.delete': 'Remove accounts',
   'roles.view': 'View permission matrix',
@@ -81,7 +83,7 @@ export const PERMISSION_GROUPS: { label: string; permissions: Permission[] }[] =
   },
   {
     label: 'People & Access',
-    permissions: ['users.view', 'registrations.review', 'users.create', 'users.create.admin', 'users.edit', 'users.delete', 'roles.view', 'roles.edit', 'sessions.view.all', 'sessions.revoke', 'audit.view', 'audit.export'],
+    permissions: ['users.view', 'registrations.review', 'users.create', 'users.create.admin', 'users.create.sub', 'users.manage.sub', 'users.edit', 'users.delete', 'roles.view', 'roles.edit', 'sessions.view.all', 'sessions.revoke', 'audit.view', 'audit.export'],
   },
   {
     label: 'Platform & Governance',

@@ -96,6 +96,8 @@ export type Permission =
   | 'users.view'
   | 'users.create'
   | 'users.create.admin'
+  | 'users.create.sub'
+  | 'users.manage.sub'
   | 'users.edit'
   | 'users.delete'
   | 'registrations.review'
@@ -150,10 +152,53 @@ export interface SystemUser {
   permissionOverrides?: Partial<Record<Permission, boolean>>;
   ipAllowlist?: string[];
   walletId?: string;
+  /* ------------------------- sub-user system (Task 5) ------------------------ */
+  /**
+   * Host account id when this account is a sub-user. Sub-users share the host's
+   * wallet (read-only) and may only exercise the host-granted `subUserFeatures`.
+   */
+  parentUserId?: string;
+  /** True for sub-user accounts (derived from `parentUserId`, persisted for queries). */
+  isSubUser?: boolean;
+  /**
+   * Host-granted feature set. The effective permissions of a sub-user are the
+   * intersection of its tier defaults with this list — see `effectivePermissions()`.
+   */
+  subUserFeatures?: Permission[];
+  /** Monthly seat price (KES) once the host exceeds the free allowance. */
+  subUserPriceKes?: number;
 }
 
 /** Legacy alias — `UserItem` was consumed by older screens. */
 export type UserItem = SystemUser;
+
+/* ------------------------------------------------------------------ *
+ * Sub-user system (Fleek IPRS SaaS — Task 5)
+ * ------------------------------------------------------------------ */
+
+/** Free sub-user seats per host; the 6th+ seat costs `SUB_USER_PRICE_KES`/month. */
+export const SUB_USER_FREE_LIMIT = 5;
+/** Monthly price (KES) per billable sub-user seat, charged to the host wallet on the 1st. */
+export const SUB_USER_PRICE_KES = 500;
+
+/** Lifecycle of a sub-user seat under a host account. */
+export type SubUserStatus = 'Active' | 'Suspended';
+
+/**
+ * A pending sub-user invitation: created by the host, accepted on first login
+ * with the temporary password. Kept minimal — the seat itself is a `SystemUser`
+ * with `parentUserId` set; this record only tracks the invite email state.
+ */
+export interface SubUserInvitation {
+  id: string;
+  hostUserId: string;
+  email: string;
+  name: string;
+  features: Permission[];
+  tempPasswordIssued: boolean;
+  createdAt: string;
+  acceptedAt?: string;
+}
 
 /* ------------------------------------------------------------------ *
  * Public registration (Fleek IPRS SaaS — Task 4)
@@ -636,6 +681,10 @@ export interface WalletTransaction {
   walletId: string;
   userId: string;
   userName: string;
+  /** Acting account when a sub-user spends from the shared host wallet. */
+  actorUserId?: string;
+  /** Host account that owns the wallet (set on shared-wallet movements). */
+  hostUserId?: string;
   at: string;
   direction: 'credit' | 'debit';
   kind: 'topup' | 'search' | 'refund' | 'adjustment' | 'subscription' | 'reversal';
@@ -884,6 +933,8 @@ export interface BillingSettings {
   blockSearchOnNegativeBalance: boolean;
   creditTermsDays: number;
   discountPct: number;
+  /** Monthly price (KES) per billable sub-user seat beyond the free allowance. */
+  subUserPriceKes: number;
 }
 
 export interface IntegrationSettings {
