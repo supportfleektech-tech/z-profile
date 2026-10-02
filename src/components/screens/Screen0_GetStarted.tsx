@@ -1,8 +1,11 @@
 import React from 'react';
-import { ArrowRight, Building2, ClipboardCheck, Fingerprint, LogIn, MailCheck, ShieldCheck } from 'lucide-react';
+import { ArrowRight, Building2, CalendarClock, ClipboardCheck, Fingerprint, LogIn, MailCheck, ShieldCheck } from 'lucide-react';
 import { useAppRouter } from '../../context/RouterContext';
 import { IprsLogo } from '../common/IprsLogo';
 import { Button } from '../ui';
+
+/** Sales inbox for demo requests — kept as a `mailto:` CTA per the brief. */
+export const SALES_EMAIL = 'sales@fleek-iprs.co.ke';
 
 /**
  * Public onboarding explainer — the front door for organisations that do not
@@ -95,8 +98,17 @@ export const Screen0_GetStarted: React.FC = () => {
 
             <div className="mt-5 space-y-2">
               <Button variant="primary" className="w-full justify-center py-2.5" icon={<ArrowRight size={14} />} onClick={() => navigate('/register')}>
-                Register your organisation
+                Get Started / Register
               </Button>
+              <a
+                href={`mailto:${SALES_EMAIL}?subject=${encodeURIComponent('Fleek IPRS demo request')}`}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg font-semibold transition-all active:scale-[0.97] whitespace-nowrap w-full px-3.5 py-2 text-xs bg-transparent hover:bg-sky-950/60 text-cyan-300 border border-cyan-500/40"
+              >
+                <CalendarClock size={14} /> Book Demo
+              </a>
+              <p className="text-center text-[10px] text-slate-600">
+                Prefer a walkthrough first? Email us at <span className="font-mono text-slate-500">{SALES_EMAIL}</span>.
+              </p>
               <Button variant="ghost" className="w-full justify-center" icon={<LogIn size={13} />} onClick={() => navigate('/login')}>
                 Back to sign-in
               </Button>

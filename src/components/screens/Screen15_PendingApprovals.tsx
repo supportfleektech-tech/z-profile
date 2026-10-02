@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Building2, CheckCircle2, Clock3, Inbox, ShieldCheck, XCircle } from 'lucide-react';
 import { useAppData } from '../../context/AppDataContext';
 import { useDb } from '../../services/db';
-import { registrationService } from '../../services/registration.service';
+import { registrationService, registrationContactName } from '../../services/registration.service';
 import type { PendingRegistration, RegistrationStatus } from '../../types';
 import { Badge, Button, Panel } from '../ui';
 
@@ -20,7 +20,8 @@ const toneFor = (s: RegistrationStatus) => (s === 'pending' ? 'warning' : s === 
  *
  * Approve mints a `user`-tier Active account (username + temp password go out
  * through the `fleek-iprs-registration-approved` email); reject records a
- * reason the reviewer can quote back to the applicant.
+ * reason and emails it to the applicant through the
+ * `fleek-iprs-pending-registration` rejected-outcome body variant.
  */
 export const Screen15_PendingApprovals: React.FC = () => {
   const { currentUser, pushToast } = useAppData();
@@ -62,7 +63,7 @@ export const Screen15_PendingApprovals: React.FC = () => {
     if (res.ok) {
       setRejectId(null);
       setReason('');
-      pushToast({ title: 'Registration rejected', description: `${reg.company} — decision recorded`, type: 'warning' });
+      pushToast({ title: 'Registration rejected', description: `${reg.company} — applicant notified by email`, type: 'warning' });
     } else {
       pushToast({ title: 'Rejection failed', description: res.message, type: 'error' });
     }
@@ -121,8 +122,7 @@ export const Screen15_PendingApprovals: React.FC = () => {
                     <div className="min-w-0">
                       <h4 className="text-[13px] font-bold text-white truncate">{reg.company}</h4>
                       <p className="text-[11px] text-slate-400 truncate">
-                        {reg.contactName} · <span className="font-mono">{reg.contactEmail}</span> · {reg.contactPhone} · {reg.county}
-                        {reg.kraPin ? ` · PIN ${reg.kraPin}` : ''}
+                        {registrationContactName(reg)} · <span className="font-mono">{reg.contactEmail}</span> · {reg.contactPhone} · {reg.county}
                       </p>
                       <p className="text-[10px] text-slate-600 font-mono mt-0.5">
                         Requested {new Date(reg.createdAt).toLocaleString('en-KE')}
@@ -139,8 +139,7 @@ export const Screen15_PendingApprovals: React.FC = () => {
                   <span className={reg.certOfIncorporation ? 'text-emerald-400' : 'text-rose-400'}>
                     {reg.certOfIncorporation ? '●' : '○'} certificate of incorporation
                   </span>
-                  <span className={reg.kraPinCert ? 'text-emerald-400' : ''}>{reg.kraPinCert ? '●' : '○'} KRA PIN cert</span>
-                  <span className={reg.idCopy ? 'text-emerald-400' : ''}>{reg.idCopy ? '●' : '○'} ID copy</span>
+                  <span className={reg.kraPinCert ? 'text-emerald-400' : ''}>{reg.kraPinCert ? '●' : '○'} corporate tax certificate</span>
                   {reg.rejectionReason && <span className="text-rose-300">Reason: {reg.rejectionReason}</span>}
                   {reg.createdUserId && <span className="text-emerald-300">Account: {reg.createdUserId}</span>}
                 </div>

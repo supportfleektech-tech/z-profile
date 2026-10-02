@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertTriangle, ArrowRight, Building2, CheckCircle2, FileUp, LogIn, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Building2, CheckCircle2, FileUp, LogIn, ShieldCheck, UserRound } from 'lucide-react';
 import { useAppRouter } from '../../context/RouterContext';
 import { IprsLogo } from '../common/IprsLogo';
 import { Button } from '../ui';
@@ -17,20 +17,26 @@ const KENYA_COUNTIES = [
 const inputClass =
   'w-full pl-3 pr-3 py-2.5 rounded-lg bg-[#050b14] border border-sky-900 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/40';
 
+const labelClass = 'block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5';
+
+const panelTitleClass = 'flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300/80 mb-3';
+
 /**
  * Public organisation registration — mirrors the Screen1_Login two-panel
- * layout. Files are converted to base64 dataURLs with a 2 MB per-file cap;
- * the request lands in the Super Admin's Pending Approvals queue.
+ * layout (marketing/context panel + form panel). The form itself is split
+ * into two panels: LEFT = organisation (company, county, certificate of
+ * incorporation, corporate tax certificate); RIGHT = contact person (first
+ * name, last name, phone, email, terms consent, Register + Back to Login).
+ * Files are converted to base64 dataURLs with a 2 MB per-file cap; the
+ * request lands in the Super Admin's Pending Approvals queue.
  */
 export const Screen2_Register: React.FC = () => {
   const { navigate } = useAppRouter();
-  const [form, setForm] = useState({ company: '', kraPin: '', county: '', contactName: '', contactEmail: '', contactPhone: '' });
+  const [form, setForm] = useState({ company: '', county: '', firstName: '', lastName: '', contactEmail: '', contactPhone: '' });
   const [cert, setCert] = useState('');
-  const [kraCert, setKraCert] = useState('');
-  const [idCopy, setIdCopy] = useState('');
+  const [taxCert, setTaxCert] = useState('');
   const [certName, setCertName] = useState('');
-  const [kraCertName, setKraCertName] = useState('');
-  const [idCopyName, setIdCopyName] = useState('');
+  const [taxCertName, setTaxCertName] = useState('');
   const [terms, setTerms] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +67,7 @@ export const Screen2_Register: React.FC = () => {
     onPick: (f: File | undefined) => void, testId: string
   ) => (
     <div>
-      <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+      <span className={labelClass}>
         {label} {required ? <span className="text-rose-400">*</span> : <span className="text-slate-600 normal-case">(optional)</span>}
       </span>
       <label
@@ -89,14 +95,13 @@ export const Screen2_Register: React.FC = () => {
     setBusy(true);
     const input: RegistrationInput = {
       company: form.company,
-      kraPin: form.kraPin,
       county: form.county,
-      contactName: form.contactName,
+      firstName: form.firstName,
+      lastName: form.lastName,
       contactEmail: form.contactEmail,
       contactPhone: form.contactPhone,
       certOfIncorporation: cert,
-      kraPinCert: kraCert || undefined,
-      idCopy: idCopy || undefined,
+      kraPinCert: taxCert || undefined,
       termsAccepted: terms,
     };
     const res = await registrationService.submit(input);
@@ -108,7 +113,7 @@ export const Screen2_Register: React.FC = () => {
   return (
     <div className="min-h-screen min-h-[100dvh] w-full flex items-stretch bg-[#050b14] tech-grid overflow-y-auto">
       {/* Marketing / context panel */}
-      <aside className="hidden lg:flex flex-col justify-between w-[46%] xl:w-[42%] px-10 xl:px-14 py-10 border-r border-sky-950/70 bg-gradient-to-br from-[#071426] via-[#061020] to-[#050b14]">
+      <aside className="hidden lg:flex flex-col justify-between w-[38%] xl:w-[34%] px-10 xl:px-14 py-10 border-r border-sky-950/70 bg-gradient-to-br from-[#071426] via-[#061020] to-[#050b14]">
         <div>
           <IprsLogo size="lg" showSubtitle />
           <h2 className="mt-8 text-2xl xl:text-[28px] font-black leading-tight text-white">
@@ -123,7 +128,7 @@ export const Screen2_Register: React.FC = () => {
           <div className="mt-8 space-y-3">
             {(
               [
-                { icon: <Building2 size={15} />, t: 'What you need', d: 'Company name, contact details and the certificate of incorporation.' },
+                { icon: <Building2 size={15} />, t: 'What you need', d: 'Company name, county and your certificate of incorporation.' },
                 { icon: <ShieldCheck size={15} />, t: 'Reviewed by a human', d: 'Every registration is verified by a platform Super Admin before activation.' },
               ] as const
             ).map((f) => (
@@ -145,7 +150,7 @@ export const Screen2_Register: React.FC = () => {
 
       {/* Form panel */}
       <main className="flex-1 flex flex-col items-center justify-center px-4 sm:px-8 py-8 w-full min-w-0">
-        <div className="w-full max-w-[440px]">
+        <div className="w-full max-w-[720px]">
           <div className="lg:hidden mb-6 flex justify-center">
             <IprsLogo size="md" showSubtitle={false} />
           </div>
@@ -162,7 +167,7 @@ export const Screen2_Register: React.FC = () => {
                 </p>
                 <p className="mt-2 text-[10px] text-slate-600 font-mono">Reference: {pendingId}</p>
                 <Button variant="ghost" className="mt-5 w-full justify-center" icon={<LogIn size={13} />} onClick={() => navigate('/login')}>
-                  Back to sign-in
+                  Back to Login
                 </Button>
               </div>
             ) : (
@@ -172,87 +177,101 @@ export const Screen2_Register: React.FC = () => {
                   A Super Admin reviews every request before a workspace is created.
                 </p>
 
-                <form onSubmit={submit} className="mt-5 space-y-3.5" noValidate>
-                  <div>
-                    <label htmlFor="reg-company" className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                      Company / organisation <span className="text-rose-400">*</span>
-                    </label>
-                    <input id="reg-company" value={form.company} onChange={set('company')} placeholder="Acme Kenya Ltd" className={inputClass} autoComplete="organization" />
+                <form onSubmit={submit} className="mt-5" noValidate>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {/* LEFT panel — organisation */}
+                    <section aria-label="Organisation details">
+                      <p className={panelTitleClass}><Building2 size={12} /> Organisation</p>
+                      <div className="space-y-3.5">
+                        <div>
+                          <label htmlFor="reg-company" className={labelClass}>
+                            Company name <span className="text-rose-400">*</span>
+                          </label>
+                          <input id="reg-company" value={form.company} onChange={set('company')} placeholder="Acme Kenya Ltd" className={inputClass} autoComplete="organization" />
+                        </div>
+
+                        <div>
+                          <label htmlFor="reg-county" className={labelClass}>
+                            County <span className="text-rose-400">*</span>
+                          </label>
+                          <select id="reg-county" value={form.county} onChange={set('county')} className={`${inputClass} ${form.county ? '' : 'text-slate-600'}`}>
+                            <option value="">Select county…</option>
+                            {KENYA_COUNTIES.map((c) => (
+                              <option key={c} value={c}>{c}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {fileRow('Certificate of incorporation', true, certName, (f) => readFile(f, (d, n) => { setCert(d); setCertName(n); }), 'reg-cert')}
+                        {fileRow('Corporate Tax Certificate', false, taxCertName, (f) => readFile(f, (d, n) => { setTaxCert(d); setTaxCertName(n); }), 'reg-kra-cert')}
+                      </div>
+                    </section>
+
+                    {/* RIGHT panel — contact person */}
+                    <section aria-label="Contact person">
+                      <p className={panelTitleClass}><UserRound size={12} /> Contact person</p>
+                      <div className="space-y-3.5">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-1 xl:grid-cols-2 gap-3">
+                          <div>
+                            <label htmlFor="reg-first-name" className={labelClass}>
+                              First name <span className="text-rose-400">*</span>
+                            </label>
+                            <input id="reg-first-name" value={form.firstName} onChange={set('firstName')} placeholder="Jane" className={inputClass} autoComplete="given-name" />
+                          </div>
+                          <div>
+                            <label htmlFor="reg-last-name" className={labelClass}>
+                              Last name <span className="text-rose-400">*</span>
+                            </label>
+                            <input id="reg-last-name" value={form.lastName} onChange={set('lastName')} placeholder="Wanjiku" className={inputClass} autoComplete="family-name" />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label htmlFor="reg-phone" className={labelClass}>
+                            Phone <span className="text-rose-400">*</span>
+                          </label>
+                          <input id="reg-phone" value={form.contactPhone} onChange={set('contactPhone')} placeholder="0712 345 678" className={inputClass} autoComplete="tel" />
+                        </div>
+
+                        <div>
+                          <label htmlFor="reg-email" className={labelClass}>
+                            Email <span className="text-rose-400">*</span>
+                          </label>
+                          <input id="reg-email" type="email" value={form.contactEmail} onChange={set('contactEmail')} placeholder="you@company.co.ke" className={inputClass} autoComplete="email" />
+                        </div>
+
+                        <label className="flex items-start gap-2.5 rounded-lg bg-[#050b14] border border-sky-900/60 px-3 py-2.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={terms}
+                            onChange={(e) => setTerms(e.target.checked)}
+                            className="mt-0.5 accent-cyan-500"
+                          />
+                          <span className="text-[11px] text-slate-400 leading-snug">
+                            I accept the <span className="text-cyan-300">Terms of Service</span> and consent to Fleek IPRS
+                            processing these documents for account verification under the Data Protection Act 2019.
+                          </span>
+                        </label>
+                      </div>
+                    </section>
                   </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label htmlFor="reg-krapin" className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                        KRA PIN
-                      </label>
-                      <input id="reg-krapin" value={form.kraPin} onChange={set('kraPin')} placeholder="P051234567A" className={inputClass} />
-                    </div>
-                    <div>
-                      <label htmlFor="reg-county" className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                        County <span className="text-rose-400">*</span>
-                      </label>
-                      <select id="reg-county" value={form.county} onChange={set('county')} className={`${inputClass} ${form.county ? '' : 'text-slate-600'}`}>
-                        <option value="">Select county…</option>
-                        {KENYA_COUNTIES.map((c) => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label htmlFor="reg-contact" className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                      Contact person <span className="text-rose-400">*</span>
-                    </label>
-                    <input id="reg-contact" value={form.contactName} onChange={set('contactName')} placeholder="Jane Wanjiku" className={inputClass} autoComplete="name" />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label htmlFor="reg-email" className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                        Work email <span className="text-rose-400">*</span>
-                      </label>
-                      <input id="reg-email" type="email" value={form.contactEmail} onChange={set('contactEmail')} placeholder="you@company.co.ke" className={inputClass} autoComplete="email" />
-                    </div>
-                    <div>
-                      <label htmlFor="reg-phone" className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                        Phone <span className="text-rose-400">*</span>
-                      </label>
-                      <input id="reg-phone" value={form.contactPhone} onChange={set('contactPhone')} placeholder="0712 345 678" className={inputClass} autoComplete="tel" />
-                    </div>
-                  </div>
-
-                  {fileRow('Certificate of incorporation', true, certName, (f) => readFile(f, (d, n) => { setCert(d); setCertName(n); }), 'reg-cert')}
-                  {fileRow('KRA PIN certificate', false, kraCertName, (f) => readFile(f, (d, n) => { setKraCert(d); setKraCertName(n); }), 'reg-kra-cert')}
-                  {fileRow('Director / contact ID copy', false, idCopyName, (f) => readFile(f, (d, n) => { setIdCopy(d); setIdCopyName(n); }), 'reg-id-copy')}
-
-                  <label className="flex items-start gap-2.5 rounded-lg bg-[#050b14] border border-sky-900/60 px-3 py-2.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={terms}
-                      onChange={(e) => setTerms(e.target.checked)}
-                      className="mt-0.5 accent-cyan-500"
-                    />
-                    <span className="text-[11px] text-slate-400 leading-snug">
-                      I accept the <span className="text-cyan-300">Terms of Service</span> and consent to Fleek IPRS
-                      processing these documents for account verification under the Data Protection Act 2019.
-                    </span>
-                  </label>
 
                   {error && (
-                    <div className="flex items-start gap-2 rounded-lg bg-rose-950/40 border border-rose-800/50 px-3 py-2 text-[11px] text-rose-300">
+                    <div className="mt-4 flex items-start gap-2 rounded-lg bg-rose-950/40 border border-rose-800/50 px-3 py-2 text-[11px] text-rose-300">
                       <AlertTriangle size={13} className="mt-0.5 shrink-0" />
                       <span>{error}</span>
                     </div>
                   )}
 
-                  <Button type="submit" variant="primary" loading={busy} className="w-full justify-center py-2.5" icon={<ArrowRight size={14} />}>
-                    {busy ? 'Submitting…' : 'Submit for review'}
-                  </Button>
+                  <div className="mt-5 space-y-2">
+                    <Button type="submit" variant="primary" loading={busy} className="w-full justify-center py-2.5" icon={<ArrowRight size={14} />}>
+                      {busy ? 'Submitting…' : 'Register'}
+                    </Button>
 
-                  <Button type="button" variant="ghost" className="w-full justify-center" icon={<LogIn size={13} />} onClick={() => navigate('/login')}>
-                    Back to sign-in
-                  </Button>
+                    <Button type="button" variant="ghost" className="w-full justify-center" icon={<LogIn size={13} />} onClick={() => navigate('/login')}>
+                      Back to Login
+                    </Button>
+                  </div>
                 </form>
               </>
             )}

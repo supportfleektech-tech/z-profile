@@ -49,7 +49,7 @@ const STARTED_AT = new Date().toISOString();
 const app = express();
 app.disable('x-powered-by');
 app.use(cors());
-// 12 MB: registration carries up to three ≤2 MB certification files as base64
+// 12 MB: registration carries up to two ≤2 MB certification files as base64
 // dataURLs (≈2.7 MB each once encoded). Per-file caps are enforced in the
 // route handler itself — this limit only stops absurd payloads.
 app.use(express.json({ limit: '12mb' }));
@@ -420,19 +420,21 @@ app.post('/api/auth/register', wrap(async (req, res) => {
   const b = req.body ?? {};
   const company = String(b.company ?? '').trim();
   const county = String(b.county ?? '').trim();
-  const contactName = String(b.contactName ?? '').trim();
+  const firstName = String(b.firstName ?? '').trim();
+  const lastName = String(b.lastName ?? '').trim();
+  const contactName = `${firstName} ${lastName}`.trim().replace(/\s+/g, ' ');
   const contactEmail = String(b.contactEmail ?? '').trim().toLowerCase();
   const contactPhone = String(b.contactPhone ?? '').trim();
   if (!company) return bad(res, 'Company or organisation name is required.');
   if (!county) return bad(res, 'County is required.');
-  if (!contactName) return bad(res, 'Contact person name is required.');
+  if (!firstName) return bad(res, 'First name is required.');
+  if (!lastName) return bad(res, 'Last name is required.');
   if (!EMAIL_RE.test(contactEmail)) return bad(res, 'Enter a valid contact email address.');
   if (!contactPhone) return bad(res, 'Contact phone number is required.');
   if (!b.certOfIncorporation) return bad(res, 'Attach your certificate of incorporation.');
   for (const [label, file] of [
     ['Certificate of incorporation', b.certOfIncorporation],
-    ['KRA PIN certificate', b.kraPinCert],
-    ['Director ID copy', b.idCopy],
+    ['Corporate Tax Certificate', b.kraPinCert],
   ]) {
     if (!file) continue;
     const size = dataUrlBytes(file);
@@ -446,11 +448,11 @@ app.post('/api/auth/register', wrap(async (req, res) => {
   await sleep(220);
   const at = now();
   const reg = {
-    id: uid('reg'), company, kraPin: String(b.kraPin ?? '').trim(), county,
-    contactName, contactEmail, contactPhone,
+    id: uid('reg'), company, county,
+    firstName, lastName, contactName,
+    contactEmail, contactPhone,
     certOfIncorporation: b.certOfIncorporation,
     ...(b.kraPinCert ? { kraPinCert: b.kraPinCert } : {}),
-    ...(b.idCopy ? { idCopy: b.idCopy } : {}),
     termsAcceptedAt: at, status: 'pending', createdAt: at,
   };
   putRegistration(reg);
@@ -513,8 +515,12 @@ app.post('/api/admin/approve-registration/:id', requirePerm('registrations.revie
   const username = buildUsername(reg.contactEmail);
   const temp = tempPassword();
   const walletId = uid('wal');
+  // Display name prefers the two-panel first/last name, falling back to the
+  // legacy single-field contactName for rows written before the fix.
+  const applicantName =
+    `${reg.firstName ?? ''} ${reg.lastName ?? ''}`.trim().replace(/\s+/g, ' ') || reg.contactName || '—';
   const user = {
-    id: uid('usr'), name: reg.contactName, email: reg.contactEmail, username,
+    id: uid('usr'), name: applicantName, email: reg.contactEmail, username,
     password: hashPassword(temp), phone: reg.contactPhone ?? '', department: reg.company ?? '',
     jobTitle: 'Workspace Owner', tier: 'user',
     status: 'Active', isSystem: false, mfaEnabled: false,
@@ -545,18 +551,19 @@ app.post('/api/admin/approve-registration/:id', requirePerm('registrations.revie
     to: reg.contactEmail,
     subject: 'Welcome to Fleek IPRS — your account is approved',
     template: 'fleek-iprs-registration-approved',
-    vars: { name: reg.contactName, company: reg.company, username, tempPassword: temp },
+    vars: { name: applicantName, company: reg.company, username, tempPassword: temp },
   });
   res.status(201).json({ ok: true, user: publicUser(user), username, tempPassword: temp });
 }));
 
 /**
- * Reject a registration with a reason. No applicant email: the five
- * `fleek-iprs-*` mail templates (Task 3 contract) include no rejection
- * template, so the decision is recorded in the queue + audit trail where the
- * reviewer quotes it back to the applicant.
+ * Reject a registration with a reason. The applicant is notified by email via
+ * `sendMailInternal` reusing the existing `fleek-iprs-pending-registration`
+ * template with the rejected-outcome body variant (`vars.outcome ===
+ * 'rejected'`) — no 6th template is introduced (Task 3 contract stays at 5).
+ * The mail dispatch is best-effort and never fails the rejection itself.
  */
-app.post('/api/admin/reject-registration/:id', requirePerm('registrations.review'), wrap((req, res) => {
+app.post('/api/admin/reject-registration/:id', requirePerm('registrations.review'), wrap(async (req, res) => {
   const actor = req.actor;
   const reg = registrationById(req.params.id);
   if (!reg) return bad(res, 'Registration request not found.', 404);
@@ -569,6 +576,17 @@ app.post('/api/admin/reject-registration/:id', requirePerm('registrations.review
     actorId: actor.id, actorName: actor.name, actorTier: actor.tier, action: 'registration.rejected',
     entity: 'PendingRegistration', entityId: reg.id, severity: 'warning', ip: clientIp(req),
     detail: `Rejected ${reg.company} <${reg.contactEmail}> — ${reason}`,
+  });
+  const applicantName =
+    `${reg.firstName ?? ''} ${reg.lastName ?? ''}`.trim().replace(/\s+/g, ' ') || reg.contactName || '—';
+  await mailer.sendMailInternal({
+    to: reg.contactEmail,
+    subject: 'Your Fleek IPRS application — outcome',
+    template: 'fleek-iprs-pending-registration',
+    vars: {
+      outcome: 'rejected', name: applicantName, company: reg.company,
+      reason, contactEmail: reg.contactEmail,
+    },
   });
   res.json({ ok: true, message: `Registration for ${reg.company} rejected.` });
 }));

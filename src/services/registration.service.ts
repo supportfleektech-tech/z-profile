@@ -20,15 +20,20 @@ export const MAX_REG_FILE_BYTES = 2 * 1024 * 1024;
 
 export interface RegistrationInput {
   company: string;
-  kraPin?: string;
   county: string;
-  contactName: string;
+  firstName: string;
+  lastName: string;
   contactEmail: string;
   contactPhone: string;
   certOfIncorporation: string;
   kraPinCert?: string;
-  idCopy?: string;
   termsAccepted: boolean;
+}
+
+/** Display name for a registration — prefers the two-panel first/last name, falls back to legacy `contactName`. */
+export function registrationContactName(r: Pick<PendingRegistration, 'firstName' | 'lastName'> & { contactName?: string }): string {
+  const full = `${r.firstName ?? ''} ${r.lastName ?? ''}`.trim().replace(/\s+/g, ' ');
+  return full || r.contactName?.trim() || '—';
 }
 
 /** Decoded byte size of a base64 dataURL (or raw base64). -1 when unparseable. */
@@ -55,14 +60,14 @@ export function buildUsername(email: string): string {
 export function validateRegistration(input: RegistrationInput): string | null {
   if (!input.company.trim()) return 'Company or organisation name is required.';
   if (!input.county.trim()) return 'County is required.';
-  if (!input.contactName.trim()) return 'Contact person name is required.';
+  if (!input.firstName.trim()) return 'First name is required.';
+  if (!input.lastName.trim()) return 'Last name is required.';
   if (!isValidEmail(input.contactEmail.trim())) return 'Enter a valid contact email address.';
   if (!input.contactPhone.trim()) return 'Contact phone number is required.';
   if (!input.certOfIncorporation) return 'Attach your certificate of incorporation.';
   for (const [label, file] of [
     ['Certificate of incorporation', input.certOfIncorporation],
-    ['KRA PIN certificate', input.kraPinCert],
-    ['Director ID copy', input.idCopy],
+    ['Corporate Tax Certificate', input.kraPinCert],
   ] as const) {
     if (!file) continue;
     const size = dataUrlBytes(file);
@@ -92,21 +97,21 @@ export const registrationService = {
       const reg: PendingRegistration = {
         id: uid('reg'),
         company: input.company.trim(),
-        kraPin: input.kraPin?.trim() ?? '',
         county: input.county.trim(),
-        contactName: input.contactName.trim(),
+        firstName: input.firstName.trim(),
+        lastName: input.lastName.trim(),
+        contactName: `${input.firstName.trim()} ${input.lastName.trim()}`.trim(),
         contactEmail: email,
         contactPhone: input.contactPhone.trim(),
         certOfIncorporation: input.certOfIncorporation,
         kraPinCert: input.kraPinCert || undefined,
-        idCopy: input.idCopy || undefined,
         termsAcceptedAt: at,
         status: 'pending',
         createdAt: at,
       };
       setState((prev) => ({ pendingRegistrations: [reg, ...prev.pendingRegistrations] }));
       auditService.append({
-        actorId: 'public', actorName: reg.contactName, actorTier: 'user',
+        actorId: 'public', actorName: registrationContactName(reg), actorTier: 'user',
         action: 'registration.submitted', entity: 'PendingRegistration', entityId: reg.id,
         severity: 'info', ip: '0.0.0.0',
         detail: `${reg.company} <${reg.contactEmail}> requested a workspace`,
@@ -127,14 +132,13 @@ export const registrationService = {
 
     const payload = {
       company: input.company.trim(),
-      kraPin: input.kraPin?.trim() ?? '',
       county: input.county.trim(),
-      contactName: input.contactName.trim(),
+      firstName: input.firstName.trim(),
+      lastName: input.lastName.trim(),
       contactEmail: input.contactEmail.trim(),
       contactPhone: input.contactPhone.trim(),
       certOfIncorporation: input.certOfIncorporation,
       kraPinCert: input.kraPinCert,
-      idCopy: input.idCopy,
       termsAccepted: input.termsAccepted,
     };
     return apiOr<{ ok: boolean; pendingId?: string; message?: string }>(
@@ -151,14 +155,14 @@ export const registrationService = {
               {
                 id: r.data.pendingId as string,
                 company: input.company.trim(),
-                kraPin: input.kraPin?.trim() ?? '',
                 county: input.county.trim(),
-                contactName: input.contactName.trim(),
+                firstName: input.firstName.trim(),
+                lastName: input.lastName.trim(),
+                contactName: `${input.firstName.trim()} ${input.lastName.trim()}`.trim(),
                 contactEmail: input.contactEmail.trim().toLowerCase(),
                 contactPhone: input.contactPhone.trim(),
                 certOfIncorporation: input.certOfIncorporation,
                 kraPinCert: input.kraPinCert || undefined,
-                idCopy: input.idCopy || undefined,
                 termsAcceptedAt: at,
                 status: 'pending' as const,
                 createdAt: at,
@@ -204,7 +208,7 @@ export const registrationService = {
       const walletId = `w-${uid('u')}`;
       const user: SystemUser = {
         id: uid('u'),
-        name: reg.contactName,
+        name: registrationContactName(reg),
         email: reg.contactEmail,
         username,
         password: tempPassword,
@@ -247,7 +251,7 @@ export const registrationService = {
         to: reg.contactEmail,
         subject: 'Welcome to Fleek IPRS — your account is approved',
         template: 'fleek-iprs-registration-approved',
-        vars: { name: reg.contactName, company: reg.company, username, tempPassword },
+        vars: { name: registrationContactName(reg), company: reg.company, username, tempPassword },
       });
       return { ok: true, username, tempPassword };
     };
@@ -274,6 +278,18 @@ export const registrationService = {
         action: 'registration.rejected', entity: 'PendingRegistration', entityId: id,
         severity: 'warning', ip: actor.lastLoginIp ?? '0.0.0.0',
         detail: `Rejected ${reg.company} <${reg.contactEmail}> — ${reason.trim()}`,
+      });
+      // Notify the applicant (best-effort — never fails the rejection). Reuses
+      // the existing `fleek-iprs-pending-registration` template with the
+      // rejected-outcome body variant; no 6th template is introduced.
+      await sendMail({
+        to: reg.contactEmail,
+        subject: 'Your Fleek IPRS application — outcome',
+        template: 'fleek-iprs-pending-registration',
+        vars: {
+          outcome: 'rejected', name: registrationContactName(reg), company: reg.company,
+          reason: reason.trim(), contactEmail: reg.contactEmail,
+        },
       });
       return { ok: true };
     };

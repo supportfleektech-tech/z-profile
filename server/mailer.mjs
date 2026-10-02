@@ -93,6 +93,29 @@ export function renderTemplate(template, vars = {}) {
       };
     }
     case 'fleek-iprs-pending-registration': {
+      // Rejected-outcome body variant: the Task 3 contract fixes the template
+      // list at five, so rejection notices reuse this template id with
+      // `vars.outcome === 'rejected'` instead of introducing a 6th template.
+      // The caller overrides the subject (`Your Fleek IPRS application —
+      // outcome`); the default subject below stays reviewer-oriented.
+      if (String(v('outcome', '')) === 'rejected') {
+        const name = v('name', 'there');
+        return {
+          subject: 'Your Fleek IPRS application — outcome',
+          html: shell(
+            'Application outcome',
+            'Your Fleek IPRS application was not approved',
+            name,
+            [
+              `Your organisation registration for <strong>${esc(v('company', 'your organisation'))}</strong> was reviewed and <strong>not approved</strong>.`,
+              `Reason given by the reviewer: <strong>${esc(v('reason', 'no reason recorded'))}</strong>.`,
+              `You may correct the issue and register again, or reply to this email via ${esc(v('contactEmail', 'your contact email'))} for clarification.`,
+            ],
+            null,
+          ),
+          text: `Hi ${name},\n\nYour Fleek IPRS registration for ${v('company', 'your organisation')} was reviewed and not approved.\nReason: ${v('reason', 'no reason recorded')}\n\nYou may correct the issue and register again.\n\n— Fleek IPRS`,
+        };
+      }
       const company = v('company', 'A new organisation');
       return {
         subject: `Fleek IPRS — new registration pending review (${company})`,

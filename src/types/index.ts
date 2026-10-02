@@ -165,25 +165,31 @@ export type RegistrationStatus = 'pending' | 'approved' | 'rejected';
 /**
  * One organisation registration request awaiting Super Admin review.
  *
- * Certification files are stored as base64 dataURLs (each capped at 2 MB —
- * enforced client-side in the Register screen and server-side in
- * `POST /api/auth/register`). Approved requests materialise as a `SystemUser`
+ * The Register screen collects the LEFT panel (company, county, certificate of
+ * incorporation + corporate tax certificate as base64 dataURLs) and the RIGHT
+ * panel (first/last name, phone, email, terms consent). Each file is capped at
+ * 2 MB decoded — enforced client-side in the Register screen and server-side
+ * in `POST /api/auth/register`. Approved requests materialise as a `SystemUser`
  * with `tier: 'user'`; the link is kept in `createdUserId`.
  */
 export interface PendingRegistration {
   id: string;
   company: string;
-  kraPin: string;
   county: string;
-  contactName: string;
+  firstName: string;
+  lastName: string;
+  /**
+   * Legacy single-field contact name (pre two-panel form). New rows always
+   * carry `firstName`/`lastName`; readers must prefer
+   * `registrationContactName()` and fall back to this for old rows.
+   */
+  contactName?: string;
   contactEmail: string;
   contactPhone: string;
   /** Certificate of incorporation — base64 dataURL, required, ≤2 MB decoded. */
   certOfIncorporation: string;
-  /** KRA PIN certificate — base64 dataURL, optional, ≤2 MB decoded. */
+  /** Corporate Tax Certificate (KRA-issued) — base64 dataURL, optional, ≤2 MB decoded. */
   kraPinCert?: string;
-  /** Director/ID copy — base64 dataURL, optional, ≤2 MB decoded. */
-  idCopy?: string;
   termsAcceptedAt: string;
   status: RegistrationStatus;
   createdAt: string;
