@@ -60,8 +60,32 @@ export interface TopUpOutcome {
 }
 
 export const walletService = {
+  /**
+   * Get the effective wallet for a user. Sub-users share their host's wallet (read-only).
+   */
   for(userId: string): Wallet {
+    const s = getSnapshot();
+    const user = s.users.find((u) => u.id === userId);
+    if (user?.isSubUser && user.parentUserId) {
+      const hostWallet = s.wallets.find((w) => w.userId === user.parentUserId);
+      if (hostWallet) return hostWallet;
+      return ensureWallet(user.parentUserId);
+    }
     return ensureWallet(userId);
+  },
+
+  /** Get the host wallet ID for a sub-user, or the user's own wallet ID. */
+  getHostWalletId(userId: string): string {
+    const s = getSnapshot();
+    const user = s.users.find((u) => u.id === userId);
+    if (user?.isSubUser && user.parentUserId) {
+      const hostWallet = s.wallets.find((w) => w.userId === user.parentUserId);
+      if (hostWallet) return hostWallet.id;
+      return `w-${user.parentUserId}`;
+    }
+    const wallet = s.wallets.find((w) => w.userId === userId);
+    if (wallet) return wallet.id;
+    return `w-${userId}`;
   },
 
   all(): Wallet[] {
@@ -73,6 +97,20 @@ export const walletService = {
     return s.walletTransactions
       .filter((t) => (!filter.userId || t.userId === filter.userId) && (!filter.kind || t.kind === filter.kind) && (!filter.status || t.status === filter.status))
       .slice(0, filter.limit ?? 500);
+  },
+
+  /** Get transactions for a sub-user showing both their own activity and host wallet movements. */
+  transactionsForActor(actorUserId: string): WalletTransaction[] {
+    const s = getSnapshot();
+    const actor = s.users.find((u) => u.id === actorUserId);
+    if (!actor) return [];
+    if (actor.isSubUser && actor.parentUserId) {
+      // Return transactions where this sub-user was the actor OR host wallet transactions
+      return s.walletTransactions
+        .filter((t) => t.actorUserId === actorUserId || t.hostUserId === actor.parentUserId)
+        .slice(0, 500);
+    }
+    return s.walletTransactions.filter((t) => t.userId === actorUserId).slice(0, 500);
   },
 
   payments(filter: { userId?: string; channel?: PaymentChannel; status?: string; from?: string; to?: string; limit?: number } = {}): PaymentRecord[] {
@@ -104,11 +142,17 @@ export const walletService = {
     const status = opts.status ?? 'success';
     const credited = status === 'success' ? amount : 0;
     const txId = uid('wt');
+    const s = getSnapshot();
+    const actorUserId = opts.actor?.id;
+    const hostUserId = actorUserId && s.users.find((u) => u.id === actorUserId)?.isSubUser ? s.users.find((u) => u.id === actorUserId)?.parentUserId : undefined;
+
     const transaction: WalletTransaction = {
       id: txId,
       walletId: wallet.id,
       userId,
-      userName: getSnapshot().users.find((u) => u.id === userId)?.name ?? 'Unknown',
+      userName: s.users.find((u) => u.id === userId)?.name ?? 'Unknown',
+      actorUserId,
+      hostUserId,
       at: new Date().toISOString(),
       direction: 'credit',
       kind: opts.kind,
@@ -145,6 +189,7 @@ export const walletService = {
     description: string;
     meta?: Record<string, string | number>;
     force?: boolean;
+    actor?: SystemUser | null;
   }): { ok: boolean; message?: string; transaction?: WalletTransaction } {
     const wallet = ensureWallet(userId);
     const s = getSnapshot();
@@ -154,11 +199,16 @@ export const walletService = {
         return { ok: false, message: `Insufficient wallet balance. You need KES ${(amount - wallet.balance).toLocaleString('en-KE')} more.` };
       }
     }
+    const actorUserId = opts.actor?.id;
+    const hostUserId = actorUserId && s.users.find((u) => u.id === actorUserId)?.isSubUser ? s.users.find((u) => u.id === actorUserId)?.parentUserId : undefined;
+
     const transaction: WalletTransaction = {
       id: uid('wt'),
       walletId: wallet.id,
       userId,
       userName: s.users.find((u) => u.id === userId)?.name ?? 'Unknown',
+      actorUserId,
+      hostUserId,
       at: new Date().toISOString(),
       direction: 'debit',
       kind: opts.kind,
@@ -178,14 +228,14 @@ export const walletService = {
       usage: prev.usage,
     }));
     auditService.append({
-      actorId: userId,
-      actorName: transaction.userName,
-      actorTier: s.users.find((u) => u.id === userId)?.tier ?? 'user',
+      actorId: opts.actor?.id ?? userId,
+      actorName: opts.actor?.name ?? transaction.userName,
+      actorTier: opts.actor?.tier ?? s.users.find((u) => u.id === userId)?.tier ?? 'user',
       action: 'wallet.debit',
       entity: 'Wallet',
       entityId: wallet.id,
       severity: 'info',
-      ip: s.users.find((u) => u.id === userId)?.lastLoginIp ?? '0.0.0.0',
+      ip: opts.actor?.lastLoginIp ?? s.users.find((u) => u.id === userId)?.lastLoginIp ?? '0.0.0.0',
       detail: `KES ${amount.toLocaleString('en-KE')} debited — ${opts.description}`,
     });
     return { ok: true, transaction };

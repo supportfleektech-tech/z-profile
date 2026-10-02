@@ -139,6 +139,7 @@ export const defaultSettings: SystemSettings = {
     blockSearchOnNegativeBalance: true,
     creditTermsDays: 7,
     discountPct: 0,
+    subUserPriceKes: 500,
   },
 
   integrations: {

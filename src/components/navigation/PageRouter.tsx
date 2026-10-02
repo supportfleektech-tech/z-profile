@@ -9,6 +9,7 @@ import { GetStartedPage } from '../../pages/GetStartedPage';
 import { RegisterPage } from '../../pages/RegisterPage';
 import { PendingApprovalsPage } from '../../pages/PendingApprovalsPage';
 import { DashboardPage } from '../../pages/DashboardPage';
+import { SubUserDashboardPage } from '../../pages/SubUserDashboardPage';
 import { NewSearchPage } from '../../pages/NewSearchPage';
 import { IdentityProfilePage } from '../../pages/IdentityProfilePage';
 import { DetailedReportPage } from '../../pages/DetailedReportPage';
@@ -89,6 +90,8 @@ export const PageRouter: React.FC = () => {
       return <NotificationsPage />;
     case '/profile':
       return <UserProfilePage />;
+    case '/sub-dashboard':
+      return <SubUserDashboardPage />;
     default:
       return <DashboardPage />;
   }

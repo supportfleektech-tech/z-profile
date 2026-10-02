@@ -1,9 +1,11 @@
-import type { AuditEntry, RoleTier, SystemUser } from '../types';
+import type { AuditEntry, Permission, RoleTier, SystemUser } from '../types';
 import { can, canCreateTier, canManageUser, effectivePermissions, legacyRoleToTier } from '../auth/permissions';
 import { getSnapshot, setState } from './db';
 import { apiOr } from './http';
 import { isValidEmail, sleep, uid } from '../lib/format';
 import { DEMO_PASSWORD } from '../data/users';
+import { billingService } from './billing.service';
+import { SUB_USER_FREE_LIMIT, SUB_USER_PRICE_KES } from '../types';
 
 /**
  * Authentication and account administration.
@@ -445,6 +447,167 @@ export const authService = {
 
   migrateLegacyRole(role: string): { tier: RoleTier } {
     return { tier: legacyRoleToTier(role) };
+  },
+
+  /**
+   * Create a sub-user under the current actor (must be a host, not a sub-user).
+   * Enforces: 5 free seats, 6th+ requires wallet balance for monthly charge.
+   */
+  async createSubUser(
+    actor: SystemUser | null,
+    input: { name: string; email: string; phone?: string; department?: string; jobTitle?: string; features: Permission[]; password?: string }
+  ): Promise<{ ok: boolean; user?: SystemUser; message?: string; tempPassword?: string }> {
+    const local = async () => {
+      await sleep(380);
+      if (!actor) return { ok: false, message: 'Not authenticated.' };
+      if (!can(actor, 'users.create.sub')) return { ok: false, message: 'You do not have permission to create sub-user seats.' };
+      if (actor.isSubUser) return { ok: false, message: 'Sub-users cannot create other sub-users.' };
+      if (actor.status !== 'Active') return { ok: false, message: 'Your account must be Active to create sub-users.' };
+
+      const email = input.email.trim().toLowerCase();
+      if (!isValidEmail(email)) return { ok: false, message: 'Enter a valid email address.' };
+      if (!input.name.trim()) return { ok: false, message: 'Full name is required.' };
+      if (!input.features?.length) return { ok: false, message: 'At least one feature must be granted.' };
+
+      const s = getSnapshot();
+      if (s.users.some((u) => u.email.toLowerCase() === email)) return { ok: false, message: 'An account with that email already exists.' };
+
+      // Check sub-user limit and wallet for 6th+ seat
+      const billingSummary = billingService.getBillingSummary(actor.id);
+      const willBeBillable = billingSummary.activeSubUsers + 1 > SUB_USER_FREE_LIMIT;
+      if (willBeBillable && !billingSummary.canAffordNextCharge) {
+        return {
+          ok: false,
+          message: `This would be your ${billingSummary.activeSubUsers + 1}th sub-user (${billingSummary.activeSubUsers + 1 - SUB_USER_FREE_LIMIT} billable). Monthly charge: KES ${billingSummary.monthlyChargeKes + SUB_USER_PRICE_KES}. Your wallet balance (KES ${billingSummary.walletBalance.toLocaleString('en-KE')}) is insufficient. Top up first.`,
+        };
+      }
+
+      const password = input.password?.trim() || DEMO_PASSWORD;
+      if (password.length < s.settings.security.passwordPolicy.minLength) {
+        return { ok: false, message: `Password must be at least ${s.settings.security.passwordPolicy.minLength} characters.` };
+      }
+
+      const walletId = `w-${uid('u')}`;
+      const tempPassword = `Fleek-${Math.random().toString(36).slice(2, 6).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}!${Math.floor(Math.random() * 900 + 100)}`;
+      const user: SystemUser = {
+        id: uid('u'),
+        name: input.name.trim(),
+        email,
+        password: tempPassword, // temporary password, user changes on first login
+        phone: input.phone?.trim() || '',
+        department: input.department?.trim() || actor.department,
+        jobTitle: input.jobTitle?.trim() || 'Sub-user',
+        tier: 'user',
+        status: 'Active',
+        isSystem: false,
+        mfaEnabled: false,
+        createdAt: new Date().toISOString(),
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        walletId,
+        parentUserId: actor.id,
+        isSubUser: true,
+        subUserFeatures: input.features,
+        subUserPriceKes: SUB_USER_PRICE_KES,
+      };
+
+      setState((prev) => ({
+        users: [...prev.users, user],
+        wallets: [
+          ...prev.wallets,
+          {
+            id: walletId,
+            userId: user.id,
+            currency: 'KES',
+            balance: 0,
+            held: 0,
+            lifetimeTopUp: 0,
+            lifetimeSpend: 0,
+            autoTopUp: false,
+            autoTopUpTriggerKes: prev.settings.billing.lowBalanceAlertKes,
+            autoTopUpAmountKes: 10000,
+            lowBalanceAlertKes: prev.settings.billing.lowBalanceAlertKes,
+            overdraftAllowed: prev.settings.billing.overdraftAllowed,
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+      }));
+
+      auditService.append({
+        actorId: actor.id,
+        actorName: actor.name,
+        actorTier: actor.tier,
+        action: 'sub_user.created',
+        entity: 'SystemUser',
+        entityId: user.id,
+        severity: 'critical',
+        ip: actor.lastLoginIp ?? '0.0.0.0',
+        detail: `Created sub-user ${user.name} <${user.email}> with ${input.features.length} granted feature(s)`,
+        meta: { hostUserId: actor.id, features: input.features.join(', ') },
+      });
+
+      return { ok: true, user, tempPassword };
+    };
+
+    return apiOr('/api/users/sub-user', { method: 'POST', body: input }, local, { syncLocal: true }).then((r) => r.data);
+  },
+
+  /**
+   * Update a sub-user's granted features. Only the host can do this.
+   */
+  async updateSubUserFeatures(
+    actor: SystemUser | null,
+    subUserId: string,
+    features: Permission[]
+  ): Promise<{ ok: boolean; message?: string }> {
+    const local = async () => {
+      await sleep(260);
+      if (!actor) return { ok: false, message: 'Not authenticated.' };
+      if (!can(actor, 'users.manage.sub')) return { ok: false, message: 'You do not have permission to manage sub-users.' };
+
+      const s = getSnapshot();
+      const sub = s.users.find((u) => u.id === subUserId);
+      if (!sub) return { ok: false, message: 'Sub-user not found.' };
+      if (sub.parentUserId !== actor.id) return { ok: false, message: 'You can only manage your own sub-users.' };
+      if (!sub.isSubUser) return { ok: false, message: 'Target is not a sub-user.' };
+
+      setState((prev) => ({
+        users: prev.users.map((u) => (u.id === subUserId ? { ...u, subUserFeatures: features } : u)),
+      }));
+
+      auditService.append({
+        actorId: actor.id,
+        actorName: actor.name,
+        actorTier: actor.tier,
+        action: 'sub_user.permissions_updated',
+        entity: 'SystemUser',
+        entityId: subUserId,
+        severity: 'info',
+        ip: actor.lastLoginIp ?? '0.0.0.0',
+        detail: `Updated granted features for sub-user ${sub.name} (${features.length} features)`,
+        meta: { hostUserId: actor.id, features: features.join(', ') },
+      });
+
+      return { ok: true };
+    };
+
+    return apiOr(`/api/users/${subUserId}/sub-features`, { method: 'PATCH', body: { features } }, local, { syncLocal: true }).then((r) => r.data);
+  },
+
+  /**
+   * Get the host wallet for a sub-user (or the user's own wallet if not a sub-user).
+   */
+  getHostWallet(user: SystemUser): SystemUser | null {
+    if (!user.isSubUser || !user.parentUserId) return user;
+    const s = getSnapshot();
+    return s.users.find((u) => u.id === user.parentUserId) ?? null;
+  },
+
+  /**
+   * Resolve the effective wallet for any user (sub-users share host wallet).
+   */
+  resolveEffectiveWallet(user: SystemUser): SystemUser {
+    return authService.getHostWallet(user) ?? user;
   },
 };
 

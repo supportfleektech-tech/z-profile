@@ -754,3 +754,17 @@ export function stats() {
     outbox: count('email_outbox'),
   };
 }
+
+export function getSnapshot() {
+  return {
+    users: users(),
+    wallets: wallets(),
+    providers: providers(),
+    settings: settings(),
+    pricing: pricing(),
+    audit: auditLog(),
+    sessions: sessions(),
+    walletTransactions: transactions(),
+    payments: payments(),
+  };
+}

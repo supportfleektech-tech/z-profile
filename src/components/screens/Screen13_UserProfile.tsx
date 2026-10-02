@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   UserCog, ShieldCheck, Bell, Palette, KeyRound, Save, Lock, Fingerprint, MonitorSmartphone,
   LogOut, Eye, EyeOff, RefreshCw, CheckCircle2, AlertTriangle, Copy, Smartphone, Globe, Trash2, Plus,
+  Users, UserPlus, UserX, UserCheck,
 } from 'lucide-react';
 import { useAppData } from '../../context/AppDataContext';
 import { useAppRouter } from '../../context/RouterContext';
@@ -10,11 +11,13 @@ import {
   Select, Tabs, TextInput, Toggle, type Column,
 } from '../ui';
 import { authService } from '../../services/auth.service';
+import { billingService } from '../../services/billing.service';
 import { scorePassword, formatDate, timeAgo, KES } from '../../lib/format';
-import { TIER_META, effectivePermissions, roleLabelFor } from '../../auth/permissions';
-import type { ApiKeyRecord, NotificationChannel, NotificationEvent, SessionRecord } from '../../types';
+import { TIER_META, effectivePermissions, roleLabelFor, PERMISSION_LABELS, PERMISSION_GROUPS } from '../../auth/permissions';
+import type { ApiKeyRecord, NotificationChannel, NotificationEvent, SessionRecord, Permission, SystemUser } from '../../types';
+import { SUB_USER_FREE_LIMIT, SUB_USER_PRICE_KES } from '../../types';
 
-const TABS = ['Profile', 'Security', 'Notifications', 'Appearance', 'API Keys'] as const;
+const TABS = ['Profile', 'Security', 'Notifications', 'Appearance', 'API Keys', 'Team Members'] as const;
 type Tab = (typeof TABS)[number];
 
 const EVENT_LABELS: Record<NotificationEvent, string> = {
@@ -57,6 +60,7 @@ export const Screen13_UserProfile: React.FC = () => {
   const {
     currentUser, pushToast, logout, settings, notificationPrefs, setNotificationPrefs, appearance,
     setAppearance, sessions, revokeSession, apiKeys, createApiKey, revokeApiKey, wallet, quota,
+    users,
   } = useAppData();
   const { navigate } = useAppRouter();
   const [tab, setTab] = useState<Tab>('Profile');
@@ -76,6 +80,119 @@ export const Screen13_UserProfile: React.FC = () => {
   const [ipDraft, setIpDraft] = useState((currentUser?.ipAllowlist ?? []).join(', '));
   const [prefs, setPrefs] = useState(notificationPrefs);
   const [newKeyLabel, setNewKeyLabel] = useState('');
+
+  /* ------------------------------- team members ------------------------------- */
+  const [teamTab, setTeamTab] = useState<'list' | 'add' | 'edit'>('list');
+  const [editingSubUser, setEditingSubUser] = useState<SystemUser | null>(null);
+  const [subUserForm, setSubUserForm] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    department: '',
+    jobTitle: '',
+    features: [] as Permission[],
+  });
+  const [subUserFormErrors, setSubUserFormErrors] = useState<Record<string, string>>({});
+
+  const subUsers = useMemo(() => users.filter((u) => u.parentUserId === currentUser?.id), [users, currentUser?.id]);
+  const billingSummary = useMemo(() => billingService.getBillingSummary(currentUser?.id ?? ''), [currentUser?.id]);
+  const canManageSubUsers = currentUser ? authService.permissionsFor(currentUser).has('users.manage.sub') : false;
+  const canCreateSubUsers = currentUser ? authService.permissionsFor(currentUser).has('users.create.sub') : false;
+
+  const validateSubUserForm = (): boolean => {
+    const errors: Record<string, string> = {};
+    if (!subUserForm.name.trim()) errors.name = 'Full name is required.';
+    if (!subUserForm.email.trim()) errors.email = 'Email is required.';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(subUserForm.email)) errors.email = 'Enter a valid email address.';
+    if (!subUserForm.features.length) errors.features = 'At least one feature must be granted.';
+    setSubUserFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const openAddSubUser = () => {
+    setSubUserForm({ name: '', email: '', phone: '', department: currentUser?.department ?? '', jobTitle: 'Sub-user', features: [] });
+    setSubUserFormErrors({});
+    setEditingSubUser(null);
+    setTeamTab('add');
+  };
+
+  const openEditSubUser = (sub: SystemUser) => {
+    setSubUserForm({
+      name: sub.name,
+      email: sub.email,
+      phone: sub.phone ?? '',
+      department: sub.department ?? '',
+      jobTitle: sub.jobTitle ?? '',
+      features: sub.subUserFeatures ?? [],
+    });
+    setSubUserFormErrors({});
+    setEditingSubUser(sub);
+    setTeamTab('edit');
+  };
+
+  const cancelSubUserForm = () => {
+    setTeamTab('list');
+    setEditingSubUser(null);
+    setSubUserForm({ name: '', email: '', phone: '', department: '', jobTitle: 'Sub-user', features: [] });
+    setSubUserFormErrors({});
+  };
+
+  const saveSubUser = async () => {
+    if (!currentUser || !validateSubUserForm()) return;
+
+    if (teamTab === 'add') {
+      const res = await authService.createSubUser(currentUser, {
+        name: subUserForm.name,
+        email: subUserForm.email,
+        phone: subUserForm.phone,
+        department: subUserForm.department,
+        jobTitle: subUserForm.jobTitle,
+        features: subUserForm.features,
+      });
+      if (res.ok) {
+        pushToast({ title: 'Sub-user created', description: `${res.user?.name} invited. Temp password: ${res.tempPassword}`, type: 'success' });
+        cancelSubUserForm();
+      } else {
+        pushToast({ title: 'Could not create sub-user', description: res.message, type: 'error' });
+      }
+    } else if (teamTab === 'edit' && editingSubUser) {
+      const res = await authService.updateSubUserFeatures(currentUser, editingSubUser.id, subUserForm.features);
+      if (res.ok) {
+        pushToast({ title: 'Permissions updated', description: `${editingSubUser.name}'s features updated`, type: 'success' });
+        cancelSubUserForm();
+      } else {
+        pushToast({ title: 'Update rejected', description: res.message, type: 'error' });
+      }
+    }
+  };
+
+  const suspendSubUser = async (sub: SystemUser) => {
+    if (!currentUser) return;
+    const res = await authService.update(currentUser, sub.id, { status: 'Suspended' });
+    if (res.ok) pushToast({ title: 'Sub-user suspended', description: `${sub.name} can no longer access the workspace`, type: 'warning' });
+    else pushToast({ title: 'Suspend rejected', description: res.message, type: 'error' });
+  };
+
+  const reactivateSubUser = async (sub: SystemUser) => {
+    if (!currentUser) return;
+    const billingSummary = billingService.getBillingSummary(currentUser.id);
+    const willBeActive = subUsers.filter((s: SystemUser) => s.status === 'Active').length + 1;
+    const willBeBillable = willBeActive > SUB_USER_FREE_LIMIT;
+    if (willBeBillable && !billingSummary.canAffordNextCharge) {
+      pushToast({ title: 'Cannot reactivate', description: `Reactivating would exceed wallet capacity for monthly billing. Top up first.`, type: 'error' });
+      return;
+    }
+    const res = await authService.update(currentUser, sub.id, { status: 'Active' });
+    if (res.ok) pushToast({ title: 'Sub-user reactivated', description: `${sub.name} can now access the workspace`, type: 'success' });
+    else pushToast({ title: 'Reactivate rejected', description: res.message, type: 'error' });
+  };
+
+  const removeSubUser = async (sub: SystemUser) => {
+    if (!currentUser) return;
+    const res = await authService.remove(currentUser, sub.id);
+    if (res.ok) pushToast({ title: 'Sub-user removed', description: `${sub.name} has been deleted`, type: 'warning' });
+    else pushToast({ title: 'Removal rejected', description: res.message, type: 'error' });
+  };
 
   const policy = settings.security.passwordPolicy;
   const strength = scorePassword(pw.next, policy);
@@ -628,6 +745,225 @@ export const Screen13_UserProfile: React.FC = () => {
             )}
             <ResponsiveTable columns={keyCols} rows={myKeys} rowKey={(k) => k.id} dense emptyTitle="You have no API keys" emptyDescription="Issue a sandbox key to start calling the verification API." />
           </Panel>
+        )}
+
+        {/* ============================ TEAM MEMBERS ============================ */}
+        {tab === 'Team Members' && (
+          <>
+            {teamTab === 'list' ? (
+              <>
+                <Callout tone="info" title="Sub-user seats" className="mb-4">
+                  <div className="grid gap-2 sm:grid-cols-4 text-center">
+                    <div className="rounded-lg border border-emerald-800/50 bg-emerald-950/25 p-3">
+                      <div className="text-2xl font-bold text-emerald-400">{billingSummary.activeSubUsers}</div>
+                      <div className="text-[10px] text-slate-500">Active sub-users</div>
+                    </div>
+                    <div className="rounded-lg border border-cyan-800/50 bg-cyan-950/25 p-3">
+                      <div className="text-2xl font-bold text-cyan-400">{billingSummary.totalSubUsers}</div>
+                      <div className="text-[10px] text-slate-500">Total seats</div>
+                    </div>
+                    <div className="rounded-lg border border-amber-800/50 bg-amber-950/25 p-3">
+                      <div className="text-2xl font-bold text-amber-400">{billingSummary.billableCount}</div>
+                      <div className="text-[10px] text-slate-500">Billable seats</div>
+                    </div>
+                    <div className="rounded-lg border border-sky-800/50 bg-sky-950/25 p-3">
+                      <div className="text-2xl font-bold text-sky-400">{KES(billingSummary.monthlyChargeKes, { decimals: false })}</div>
+                      <div className="text-[10px] text-slate-500">Monthly charge</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                    <div className="text-slate-400">
+                      Free allowance: <span className="font-semibold text-white">{SUB_USER_FREE_LIMIT}</span> seats · Then <span className="font-semibold text-white">{KES(SUB_USER_PRICE_KES)}</span>/seat/month
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <ProgressBar value={billingSummary.walletBalance} max={Math.max(1, billingSummary.monthlyChargeKes + 5000)} label="Wallet" right={KES(billingSummary.walletBalance, { decimals: false })} warning={0.5} danger={0.25} className="w-48" />
+                      {billingSummary.canAffordNextCharge ? (
+                        <Badge tone="success" dot>Can cover next charge</Badge>
+                      ) : (
+                        <Badge tone="danger" dot>Insufficient for next charge</Badge>
+                      )}
+                    </div>
+                  </div>
+                </Callout>
+
+                <Panel title="Your sub-users" subtitle={`${subUsers.length} seat(s) • Click a row to edit permissions`} icon={<Users size={14} className="text-cyan-400" />} >
+                  <div className="flex flex-wrap items-center gap-2 mb-3">
+                    {canCreateSubUsers && subUsers.length < 20 && (
+                      <Button size="sm" variant="primary" icon={<UserPlus size={12} />} onClick={openAddSubUser}>
+                        Add sub-user
+                      </Button>
+                    )}
+                    {subUsers.length >= 20 && <Badge tone="warning">Maximum 20 sub-users reached</Badge>}
+                    {!canCreateSubUsers && <Badge tone="neutral">You cannot create sub-users</Badge>}
+                  </div>
+                  {subUsers.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Users size={32} className="text-slate-600 mx-auto mb-2" />
+                      <p className="text-sm text-slate-400">No sub-users yet. Add your first team member.</p>
+                    </div>
+                  ) : (
+                    <ResponsiveTable<SystemUser>
+                      columns={[
+                        {
+                          key: 'name',
+                          header: 'Name',
+                          mobilePrimary: true,
+                          render: (u) => (
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 text-[11px] font-semibold text-white truncate">
+                                <span className={`w-2 h-2 rounded-full ${u.status === 'Active' ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                                {u.name}
+                                {u.isSubUser && <Badge tone="info" className="ml-1">Sub-user</Badge>}
+                              </div>
+                              <div className="text-[10px] text-slate-500 truncate">{u.email}</div>
+                            </div>
+                          ),
+                          sortValue: (u) => u.name,
+                        },
+                        {
+                          key: 'role',
+                          header: 'Role',
+                          render: (u) => <Badge tone={u.status === 'Active' ? 'success' : 'warning'} dot>{u.status}</Badge>,
+                          sortValue: (u) => u.status,
+                        },
+                        {
+                          key: 'features',
+                          header: 'Granted features',
+                          render: (u) => (
+                            <div className="flex flex-wrap gap-1">
+                              {(u.subUserFeatures ?? []).slice(0, 5).map((p) => (
+                                <span key={p} className="px-1.5 py-0.5 rounded bg-sky-950/70 border border-sky-900/60 text-[9px] font-mono text-cyan-300/80">{PERMISSION_LABELS[p] ?? p}</span>
+                              ))}
+                              {(u.subUserFeatures ?? []).length > 5 && (
+                                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[9px] text-slate-400">+{(u.subUserFeatures ?? []).length - 5} more</span>
+                              )}
+                            </div>
+                          ),
+                          className: 'hidden lg:table-cell',
+                        },
+                        {
+                          key: 'wallet',
+                          header: 'Wallet',
+                          render: () => (
+                            <div className="text-[11px] text-emerald-300 font-mono">{KES(billingSummary.walletBalance, { decimals: false })}</div>
+                          ),
+                          className: 'hidden md:table-cell',
+                        },
+                        {
+                          key: 'actions',
+                          header: '',
+                          align: 'right',
+                          render: (u) => (
+                            <div className="flex items-center justify-end gap-1.5">
+                              {canManageSubUsers && (
+                                <Button size="xs" variant="ghost" icon={<UserCheck size={11} />} onClick={() => openEditSubUser(u)}>Edit</Button>
+                              )}
+                              {u.status === 'Active' && canManageSubUsers && (
+                                <Button size="xs" variant="danger" icon={<UserX size={11} />} onClick={() => suspendSubUser(u)}>
+                                  <span className="hidden sm:inline">Suspend</span>
+                                </Button>
+                              )}
+                              {u.status === 'Suspended' && canManageSubUsers && (
+                                <Button size="xs" variant="success" icon={<UserCheck size={11} />} onClick={() => reactivateSubUser(u)}>
+                                  <span className="hidden sm:inline">Reactivate</span>
+                                </Button>
+                              )}
+                              {canManageSubUsers && (
+                                <Button size="xs" variant="danger" icon={<Trash2 size={11} />} onClick={() => removeSubUser(u)}>
+                                  <span className="hidden sm:inline">Delete</span>
+                                </Button>
+                              )}
+                            </div>
+                          ),
+                          renderMobile: (u) => (
+                            <div className="flex flex-wrap gap-1.5">
+                              {canManageSubUsers && (
+                                <Button size="xs" variant="ghost" icon={<UserCheck size={11} />} onClick={() => openEditSubUser(u)}>Edit</Button>
+                              )}
+                              {u.status === 'Active' && canManageSubUsers && (
+                                <Button size="xs" variant="danger" icon={<UserX size={11} />} onClick={() => suspendSubUser(u)}>Suspend</Button>
+                              )}
+                              {u.status === 'Suspended' && canManageSubUsers && (
+                                <Button size="xs" variant="success" icon={<UserCheck size={11} />} onClick={() => reactivateSubUser(u)}>Reactivate</Button>
+                              )}
+                              {canManageSubUsers && (
+                                <Button size="xs" variant="danger" icon={<Trash2 size={11} />} onClick={() => removeSubUser(u)}>Delete</Button>
+                              )}
+                            </div>
+                          ),
+                        },
+                      ]}
+                      rows={subUsers}
+                      rowKey={(u) => u.id}
+                      dense
+                      emptyTitle="No sub-users"
+                      emptyDescription="Add your first sub-user to start sharing your wallet and delegating work."
+                    />
+                  )}
+                </Panel>
+              </>
+            ) : (
+              <Panel title={teamTab === 'add' ? 'Add sub-user' : 'Edit sub-user permissions'} subtitle="Grant the features this sub-user may access. Searches are billed to your shared wallet." icon={<UserPlus size={14} className="text-cyan-400" />} >
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Full name" error={subUserFormErrors.name}>
+                      <TextInput value={subUserForm.name} onChange={(e) => setSubUserForm({ ...subUserForm, name: e.target.value })} disabled={teamTab === 'edit'} />
+                    </Field>
+                    <Field label="Email" error={subUserFormErrors.email}>
+                      <TextInput value={subUserForm.email} onChange={(e) => setSubUserForm({ ...subUserForm, email: e.target.value })} disabled={teamTab === 'edit'} />
+                    </Field>
+                    <Field label="Phone">
+                      <TextInput value={subUserForm.phone} className="font-mono" onChange={(e) => setSubUserForm({ ...subUserForm, phone: e.target.value })} />
+                    </Field>
+                    <Field label="Job title">
+                      <TextInput value={subUserForm.jobTitle} onChange={(e) => setSubUserForm({ ...subUserForm, jobTitle: e.target.value })} />
+                    </Field>
+                    <Field label="Department">
+                      <TextInput value={subUserForm.department} onChange={(e) => setSubUserForm({ ...subUserForm, department: e.target.value })} />
+                    </Field>
+                  </div>
+
+                  <Field label="Granted features" error={subUserFormErrors.features}>
+                    <Callout tone="info" className="mb-2">
+                      Select the permissions this sub-user may exercise. They share your wallet (read-only) and can only run the checks you enable here.
+                    </Callout>
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
+                      {PERMISSION_GROUPS.map((group) => (
+                        <fieldset key={group.label} className="border border-sky-900/50 rounded-lg p-3 space-y-2">
+                          <legend className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{group.label}</legend>
+                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            {group.permissions.map((perm) => (
+                              <label key={perm} className="flex items-center gap-2 cursor-pointer">
+                                <Checkbox
+                                  checked={subUserForm.features.includes(perm)}
+                                  onChange={(checked) =>
+                                    setSubUserForm({
+                                      ...subUserForm,
+                                      features: checked
+                                        ? [...subUserForm.features, perm]
+                                        : subUserForm.features.filter((p) => p !== perm),
+                                    })
+                                  }
+                                />
+                                <span className="text-[11px] text-slate-300">{PERMISSION_LABELS[perm] ?? perm}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </fieldset>
+                      ))}
+                    </div>
+                  </Field>
+
+                  <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-sky-900/30">
+                    <Button size="sm" variant="ghost" onClick={cancelSubUserForm}>Cancel</Button>
+                    <Button size="sm" variant="primary" icon={<Save size={11} />} onClick={saveSubUser}>
+                      {teamTab === 'add' ? 'Create sub-user' : 'Save permissions'}
+                    </Button>
+                  </div>
+                </div>
+              </Panel>
+            )}
+          </>
         )}
 
         <div className="flex items-center justify-center gap-1.5 text-[10px] text-slate-600 pb-2">

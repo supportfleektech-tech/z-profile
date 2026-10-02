@@ -721,6 +721,170 @@ app.post('/api/users/:id/reset-password', requirePerm('users.edit'), wrap((req, 
   res.json({ ok: true, tempPassword: temp, message: `Temporary password issued for ${target.name}.` });
 }));
 
+/* --------------------------------- sub-users --------------------------------- */
+
+import { SUB_USER_FREE_LIMIT, SUB_USER_PRICE_KES } from './types.mjs';
+
+/**
+ * Create a sub-user under the current actor (host).
+ * Enforces: 5 free seats, 6th+ requires wallet balance for monthly charge.
+ * Calls server-side `sendMailInternal` for invitation email.
+ */
+app.post('/api/users/sub-user', wrap(async (req, res) => {
+  const actor = actorOf(req);
+  const input = req.body ?? {};
+  if (!actor) return bad(res, 'Not authenticated.', 401);
+  if (!canCreateTier(actor, 'user') && !can(actor, 'users.create.sub')) return bad(res, 'You do not have permission to create sub-user seats.', 403);
+  if (actor.isSubUser) return bad(res, 'Sub-users cannot create other sub-users.', 403);
+  if (actor.status !== 'Active') return bad(res, 'Your account must be Active to create sub-users.', 403);
+
+  const { name, email, phone, department, jobTitle, features } = input;
+  if (!name?.trim()) return bad(res, 'Full name is required.');
+  if (!email?.trim()) return bad(res, 'Email is required.');
+  if (!features?.length) return bad(res, 'At least one feature must be granted.');
+
+  const s = settings();
+  const existing = findUserByEmail(email.trim().toLowerCase());
+  if (existing) return bad(res, 'An account with that email already exists.', 409);
+
+  // TODO: replace with proper billingService when server wallet is refactored
+  const subs = users().filter((u) => u.parentUserId === actor.id && u.status === 'Active');
+  const totalSubUsers = subs.length;
+  const billableCount = Math.max(0, totalSubUsers - SUB_USER_FREE_LIMIT);
+  const willBeBillable = totalSubUsers + 1 > SUB_USER_FREE_LIMIT;
+  if (willBeBillable) {
+    const hostWallet = wallets().find((w) => w.userId === actor.id);
+    if (!hostWallet || hostWallet.balance < (billableCount + 1) * SUB_USER_PRICE_KES) {
+      return bad(res, `Insufficient wallet balance for additional billable seat. Required: KES ${(billableCount + 1) * SUB_USER_PRICE_KES}.`);
+    }
+  }
+
+  await sleep(220);
+  const walletId = uid('wal');
+  const tempPassword = `Fleek-${Math.random().toString(36).slice(2, 6).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}!${Math.floor(Math.random() * 900 + 100)}`;
+  const user = {
+    id: uid('usr'),
+    name: name.trim(),
+    email: email.trim().toLowerCase(),
+    password: hashPassword(tempPassword),
+    phone: phone?.trim() || '',
+    department: department?.trim() || actor.department,
+    jobTitle: jobTitle?.trim() || 'Sub-user',
+    tier: 'user',
+    status: 'Active',
+    isSystem: false,
+    mfaEnabled: false,
+    createdAt: now(),
+    failedLoginAttempts: 0,
+    lockedUntil: null,
+    walletId,
+    parentUserId: actor.id,
+    isSubUser: true,
+    subUserFeatures: features,
+    subUserPriceKes: SUB_USER_PRICE_KES,
+  };
+
+  db.exec('BEGIN');
+  try {
+    putUser(user);
+    putWallet({
+      id: walletId,
+      userId: user.id,
+      currency: 'KES',
+      balance: 0,
+      held: 0,
+      lifetimeTopUp: 0,
+      lifetimeSpend: 0,
+      autoTopUp: false,
+      autoTopUpTriggerKes: s.billing?.lowBalanceAlertKes ?? 5000,
+      autoTopUpAmountKes: 10000,
+      lowBalanceAlertKes: s.billing?.lowBalanceAlertKes ?? 5000,
+      overdraftAllowed: !!s.billing?.overdraftAllowed,
+      updatedAt: now(),
+    });
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+
+  appendAudit({
+    actorId: actor.id,
+    actorName: actor.name,
+    actorTier: actor.tier,
+    action: 'sub_user.created',
+    entity: 'SystemUser',
+    entityId: user.id,
+    severity: 'critical',
+    ip: clientIp(req),
+    detail: `Created sub-user ${user.name} <${user.email}> with ${features.length} granted feature(s)`,
+    meta: { hostUserId: actor.id, features },
+  });
+
+  // Send invitation email with temporary password
+  await mailer.sendMailInternal({
+    to: user.email,
+    subject: `You have been invited to ${actor.name}'s Fleek IPRS workspace`,
+    template: 'fleek-iprs-sub-user-invite',
+    vars: {
+      name: user.name,
+      hostName: actor.name,
+      hostCompany: actor.department || 'Fleek IPRS',
+      username: user.username ?? user.email.split('@')[0],
+      tempPassword,
+      loginUrl: 'https://fleek-iprs.co.ke/#/login',
+    },
+  });
+
+  res.status(201).json({ ok: true, user: publicUser(user), tempPassword });
+}));
+
+/** List sub-users for the current host. */
+app.get('/api/users/:id/sub-users', requirePerm('users.view'), wrap((req, res) => {
+  const actor = actorOf(req);
+  const hostId = req.params.id;
+  if (!actor) return bad(res, 'Not authenticated.', 401);
+  if (hostId !== actor.id && actor.tier !== 'super_admin') return bad(res, 'You can only view your own sub-users.', 403);
+  const subs = users().filter((u) => u.parentUserId === hostId && u.isSubUser);
+  res.json(subs.map(publicUser));
+}));
+
+/** Update a sub-user's granted features. */
+app.patch('/api/users/:id/sub-features', requirePerm('users.manage.sub'), wrap((req, res) => {
+  const actor = actorOf(req);
+  const subId = req.params.id;
+  const { features } = req.body ?? {};
+  if (!features?.length) return bad(res, 'At least one feature must be granted.');
+
+  const sub = findUser(subId);
+  if (!sub) return bad(res, 'Sub-user not found.', 404);
+  if (sub.parentUserId !== actor.id && actor.tier !== 'super_admin') return bad(res, 'You can only manage your own sub-users.', 403);
+  if (!sub.isSubUser) return bad(res, 'Target is not a sub-user.', 403);
+
+  putUser({ ...sub, subUserFeatures: features });
+  appendAudit({
+    actorId: actor.id,
+    actorName: actor.name,
+    actorTier: actor.tier,
+    action: 'sub_user.permissions_updated',
+    entity: 'SystemUser',
+    entityId: subId,
+    severity: 'info',
+    ip: clientIp(req),
+    detail: `Updated granted features for sub-user ${sub.name} (${features.length} features)`,
+    meta: { hostUserId: actor.id, features },
+  });
+  res.json({ ok: true });
+}));
+
+/** Monthly cron endpoint — gated by IPRS_CRON_SECRET. */
+app.post('/api/cron/sub-billing', wrap(async (req, res) => {
+  const secret = req.headers['x-cron-secret'] || req.query.secret;
+  if (secret !== process.env.IPRS_CRON_SECRET) return bad(res, 'Invalid cron secret.', 401);
+  // TODO: implement proper billing cron when server wallet is refactored
+  res.json({ ok: true, processed: 0, charged: 0, suspended: 0, errors: [] });
+}));
+
 /* --------------------------------- wallet --------------------------------- */
 
 app.get('/api/wallet', requireActor, wrap((req, res) => {

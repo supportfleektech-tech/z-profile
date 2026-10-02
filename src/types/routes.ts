@@ -275,6 +275,16 @@ export const platformRoutes: PageRoute[] = [
     description: 'Personal details, password and 2FA, sessions, API keys, notification channels and appearance',
     permission: 'profile.manage',
   },
+  {
+    id: 'sub-dashboard',
+    path: '/sub-dashboard',
+    title: 'Sub-user Dashboard',
+    shortTitle: 'Sub-dashboard',
+    moduleNumber: 20,
+    category: 'core',
+    icon: 'LayoutDashboard',
+    description: 'Fresh dashboard for sub-users — shared wallet, host-granted checks, assigned cases only',
+  },
 ];
 
 export const CATEGORY_LABELS: Record<PageRoute['category'], string> = {

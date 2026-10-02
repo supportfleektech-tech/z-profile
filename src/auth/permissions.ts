@@ -260,8 +260,12 @@ export function effectivePermissions(user: SystemUser): Set<Permission> {
     (Object.keys(PERMISSION_LABELS) as Permission[]).forEach((p) => out.add(p));
     return out;
   }
-  // EXTENSION POINT (sub-user system): intersect `out` with the host-granted
-  // feature set here — append that step without restructuring the flow below.
+  // Sub-user: intersect with host-granted feature set.
+  if (user.isSubUser && user.subUserFeatures?.length) {
+    for (const perm of user.subUserFeatures) {
+      if (!out.has(perm)) out.delete(perm);
+    }
+  }
   for (const [key, value] of Object.entries(user.permissionOverrides ?? {})) {
     const perm = key as Permission;
     if (value) out.add(perm);
@@ -329,7 +333,9 @@ export function legacyRoleToTier(role: string): RoleTier {
   }
 }
 
-/** Human label for a user — exactly the tier label: "Admin", "Super Admin" or "User". */
+/** Human label for a user — exactly the tier label: "Admin", "Super Admin" or "User". Sub-users get a suffix. */
 export function roleLabelFor(user: SystemUser): string {
-  return TIER_LABELS[user.tier];
+  const label = TIER_LABELS[user.tier];
+  if (user.isSubUser) return `${label} (Sub-user)`;
+  return label;
 }

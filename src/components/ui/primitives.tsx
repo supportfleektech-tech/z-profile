@@ -480,6 +480,66 @@ export const Callout: React.FC<{
   );
 };
 
+/* --------------------------------- SubUserBadge -------------------------------- */
+
+export type SubUserBadgeTone = 'active' | 'suspended' | 'billable' | 'free';
+
+export const SubUserBadge: React.FC<{ tone: SubUserBadgeTone; children?: React.ReactNode; className?: string }> = ({
+  tone,
+  children,
+  className,
+}) => {
+  const tones: Record<SubUserBadgeTone, { bg: string; text: string; border: string; icon?: React.ReactNode }> = {
+    active: { bg: 'bg-emerald-500/15', text: 'text-emerald-300', border: 'border-emerald-500/30' },
+    suspended: { bg: 'bg-rose-500/15', text: 'text-rose-300', border: 'border-rose-500/30' },
+    billable: { bg: 'bg-amber-500/15', text: 'text-amber-300', border: 'border-amber-500/30' },
+    free: { bg: 'bg-cyan-500/15', text: 'text-cyan-300', border: 'border-cyan-500/30' },
+  };
+  const t = tones[tone];
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold border whitespace-nowrap',
+        t.bg,
+        t.text,
+        t.border,
+        className
+      )}
+    >
+      {children ?? (tone === 'active' ? 'Active' : tone === 'suspended' ? 'Suspended' : tone === 'billable' ? 'Billable' : 'Free')}
+    </span>
+  );
+};
+
+/**
+ * Limit indicator for sub-user seats.
+ * Shows: "Free: 5/5" or "Paid: N × 500 KSH/mo"
+ */
+export const SubUserLimitIndicator: React.FC<{ activeCount: number; freeLimit?: number; pricePerSeat?: number; className?: string }> = ({
+  activeCount,
+  freeLimit = 5,
+  pricePerSeat = 500,
+  className,
+}) => {
+  const billable = Math.max(0, activeCount - freeLimit);
+  const isFree = billable === 0;
+  return (
+    <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold border whitespace-nowrap', isFree ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/15 text-amber-300 border-amber-500/30', className)}>
+      {isFree ? (
+        <>
+          <span className="text-emerald-400">Free</span>
+          <span className="font-mono">{activeCount}/{freeLimit}</span>
+        </>
+      ) : (
+        <>
+          <span className="text-amber-400">Paid</span>
+          <span className="font-mono">{billable} × {pricePerSeat} KSH/mo</span>
+        </>
+      )}
+    </span>
+  );
+};
+
 /* --------------------------------- CopyButton -------------------------------- */
 
 export const CopyButton: React.FC<{ value: string; label?: string; size?: 'xs' | 'sm' }> = ({ value, label, size = 'xs' }) => {
