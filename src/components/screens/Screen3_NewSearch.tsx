@@ -6,7 +6,7 @@ import {
 import { useAppData } from '../../context/AppDataContext';
 import { useAppRouter } from '../../context/RouterContext';
 import { Badge, Button, Callout, Checkbox, Field, Panel, Select, TextInput } from '../ui';
-import { kycItems, kybItems, pricingProvenance } from '../../data/pricing';
+import { kycItems, kybItems, pricingProvenance, TRACING_IDS } from '../../data/pricing';
 import { spinModuleForItem } from '../../data/spinModules';
 import { KES, uid } from '../../lib/format';
 import type { PricedItem } from '../../types';
@@ -51,8 +51,16 @@ export const Screen3_NewSearch: React.FC<Props> = ({ onExecuteSearch }) => {
   const [stages, setStages] = useState<{ label: string; ok: boolean; ms: number }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [consentRef] = useState(() => uid('CNS').toUpperCase());
+  const [skipTracing, setSkipTracing] = useState(false);
 
-  const catalogue = useMemo(() => ({ kyc: kycItems(), kyb: kybItems() }), []);
+  const catalogue = useMemo(() => {
+    const base = { kyc: kycItems(), kyb: kybItems() };
+    if (!skipTracing) return base;
+    return {
+      kyc: base.kyc.filter((item) => !TRACING_IDS.has(item.id)),
+      kyb: base.kyb.filter((item) => !TRACING_IDS.has(item.id)),
+    };
+  }, [skipTracing]);
   const byId = useMemo(() => Object.fromEntries(pricing.items.map((i) => [i.id, i])), [pricing.items]);
 
   const subtotal = priceSearch(selected);
@@ -61,7 +69,10 @@ export const Screen3_NewSearch: React.FC<Props> = ({ onExecuteSearch }) => {
   const preflight = preflightSearch(selected);
 
   const toggle = (id: string) => setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  const applyPreset = (p: (typeof PRESETS)[number]) => setSelected(p.items);
+  const applyPreset = (p: (typeof PRESETS)[number]) => {
+    const items = skipTracing ? p.items.filter((id) => !TRACING_IDS.has(id)) : p.items;
+    setSelected(items);
+  };
 
   const canRun = fullName.trim().length > 2 && idNumber.trim().length >= 5 && consent && selected.length > 0 && !running;
 
@@ -99,6 +110,8 @@ export const Screen3_NewSearch: React.FC<Props> = ({ onExecuteSearch }) => {
       checkIds: selected,
       consentRef,
       caseId: caseId || undefined,
+      skipTracing,
+      purpose,
     });
 
     setRunning(false);
@@ -362,6 +375,15 @@ export const Screen3_NewSearch: React.FC<Props> = ({ onExecuteSearch }) => {
                   <span className="text-[11px] text-slate-300 leading-snug">
                     I confirm the data subject has given consent under the <strong>Data Protection Act, 2019</strong> and that this
                     query is for the stated purpose only.
+                  </span>
+                }
+              />
+              <Checkbox
+                checked={skipTracing}
+                onChange={setSkipTracing}
+                label={
+                  <span className="text-[11px] text-slate-300 leading-snug">
+                    Exclude skip-tracing checks (phone-number-by-ID lookup) from this search
                   </span>
                 }
               />

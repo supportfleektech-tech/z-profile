@@ -24,6 +24,10 @@ export interface SearchRequest {
   checkIds: string[];
   consentRef?: string;
   caseId?: string;
+  /** Whether skip-tracing checks were excluded. */
+  skipTracing?: boolean;
+  /** Purpose of processing for the consent record. */
+  purpose?: string;
 }
 
 export interface SearchOutcome {
@@ -199,6 +203,14 @@ export const searchService = {
     if (req.fullName) dossier.subject.fullName = req.fullName;
     if (req.idNumber) dossier.subject.idNumber = req.idNumber;
 
+    // Set dossier meta with checkIds, skipTracing, consentRef, purpose
+    dossier.meta = {
+      checkIds: req.checkIds,
+      skipTracing: req.skipTracing ?? false,
+      consentRef,
+      purpose: req.purpose ?? 'Customer onboarding (KYC)',
+    };
+
     const profile = dossierToProfile(dossier);
 
     // 5. Persist results, usage, activity and notifications.
@@ -207,7 +219,7 @@ export const searchService = {
       dossierCache: { ...prev.dossierCache, [dossier.id]: dossier },
       usage: [...usageEntries, ...prev.usage].slice(0, 2000),
       searchHistory: [
-        { query: req.idNumber || req.phone || req.fullName, at: new Date().toISOString(), subject: dossier.subject.fullName, costKes: price.total, userId: actor.id },
+        { query: req.idNumber || req.phone || req.fullName, at: new Date().toISOString(), subject: dossier.subject.fullName, costKes: price.total, userId: actor.id, checkIds: req.checkIds, skipTracing: req.skipTracing ?? false },
         ...prev.searchHistory,
       ].slice(0, 50),
       activities: [

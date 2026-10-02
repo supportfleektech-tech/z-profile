@@ -14,6 +14,7 @@ import type {
   ProviderConfig,
   ProviderRequestLog,
   PricingCatalog,
+  SearchHistoryEntry,
   SessionRecord,
   SystemSettings,
   SystemUser,
@@ -129,7 +130,7 @@ interface AppDataContextType {
   activeDossier: Dossier;
   activeProfile: IdentityProfile;
   lastSearchResult: SearchResult | null;
-  searchHistory: { query: string; at: string; subject: string; costKes: number; userId: string }[];
+  searchHistory: SearchHistoryEntry[];
   runSearch: (req: Omit<SearchRequest, 'actor'>) => Promise<SearchOutcome>;
   priceSearch: (checkIds: string[]) => number;
   preflightSearch: (checkIds: string[]) => { ok: boolean; reason?: string; costKes: number; balance: number };

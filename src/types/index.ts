@@ -504,6 +504,12 @@ export interface Dossier {
   };
   sections: DossierSection[];
   events: VerificationEvent[];
+  meta: {
+    checkIds: string[];
+    skipTracing: boolean;
+    consentRef: string;
+    purpose: string;
+  };
   attestation: {
     preparedBy: string;
     preparedByTier: RoleTier;
@@ -1073,6 +1079,16 @@ export interface SearchResult {
   dossierId?: string;
   costKes?: number;
   actorId?: string;
+}
+
+export interface SearchHistoryEntry {
+  query: string;
+  at: string;
+  subject: string;
+  costKes: number;
+  userId: string;
+  checkIds: string[];
+  skipTracing: boolean;
 }
 
 /* ------------------------------------------------------------------ *

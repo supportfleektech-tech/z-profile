@@ -16,6 +16,7 @@ import type {
   ProviderConfig,
   ProviderRequestLog,
   QuotaState,
+  SearchHistoryEntry,
   SessionRecord,
   SystemSettings,
   SystemUser,
@@ -74,7 +75,7 @@ export interface DbState {
   cases: CaseItem[];
   usage: UsageRecord[];
   activities: ActivityItem[];
-  searchHistory: { query: string; at: string; subject: string; costKes: number; userId: string }[];
+  searchHistory: SearchHistoryEntry[];
 
   /* dossier / report */
   activeDossier: Dossier;

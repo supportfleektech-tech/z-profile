@@ -73,17 +73,82 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
 
   const cached = useMemo(() => Object.values(getSnapshot().dossierCache), []);
 
-  const TABS = useMemo(
-    () =>
-      [
-        'Overview',
-        'Personal',
-        'Financial',
-        'Connections',
-        'Logs',
-      ] as const,
-    []
-  );
+  // Map checkIds to section IDs to determine which sections were run
+  const CHECK_ID_TO_SECTION: Record<string, string> = {
+    'kyc-id': 'sec-civil',
+    'kyc-kra': 'sec-kra',
+    'kyc-mpesa': 'sec-mpesa',
+    'kyc-crb': 'sec-crb',
+    'kyc-address': 'sec-utility',
+    'kyc-employer': 'sec-employer',
+    'kyc-criminal': 'sec-criminal',
+    'kyc-pep': 'sec-screening',
+    'kyc-deceased': 'sec-civil',
+    'kyc-face': 'sec-civil',
+    'kyc-bank': 'sec-financial',
+    'kyc-alien': 'sec-civil',
+    'kyc-passport': 'sec-civil',
+    'kyc-sim': 'sec-mpesa',
+    'kyc-namephone': 'sec-mpesa',
+    'kyc-phonebyid': 'sec-mpesa',
+    'kyc-statement': 'sec-financial',
+    'kyc-vehicle': 'sec-financial',
+    'kyc-id-kra': 'sec-civil',
+    'kyc-fullkyc': 'sec-civil',
+    'kyc-metropol-full': 'sec-crb',
+    'kyc-creditinfo': 'sec-crb',
+    'kyc-metropol-score': 'sec-crb',
+    'kyc-ci-score': 'sec-crb',
+    'kyc-ci-status': 'sec-crb',
+    'kyc-driving-licence': 'sec-financial',
+    'kyb-registry': 'sec-business',
+    'kyb-directors': 'sec-business',
+    'kyb-bo': 'sec-business',
+    'kyb-tax': 'sec-business',
+    'kyb-crb': 'sec-business',
+    'kyb-litigation': 'sec-business',
+    'kyb-licence': 'sec-business',
+  };
+
+  // Determine which section IDs were actually run based on dossier.meta.checkIds
+  const runSectionIds = useMemo(() => {
+    if (!d.meta?.checkIds?.length) return new Set(d.sections.map((s) => s.id));
+    const ids = new Set<string>();
+    for (const checkId of d.meta.checkIds) {
+      const sectionId = CHECK_ID_TO_SECTION[checkId];
+      if (sectionId) ids.add(sectionId);
+    }
+    // Always include risk and connections sections as they are derived
+    ids.add('sec-risk');
+    ids.add('sec-connections');
+    return ids;
+  }, [d.meta?.checkIds, d.sections]);
+
+  // Check if a section was run
+  const isSectionRun = (sectionId: string) => runSectionIds.has(sectionId);
+
+  // Determine which tabs should be visible
+  const visibleTabs = useMemo(() => {
+    const tabs: string[] = ['Overview'];
+    // Personal tab: civil, address, documents, employment
+    if (isSectionRun('sec-civil') || isSectionRun('sec-employer')) tabs.push('Personal');
+    // Financial tab: tax, mpesa, crb, utility, financial
+    if (isSectionRun('sec-kra') || isSectionRun('sec-mpesa') || isSectionRun('sec-crb') || isSectionRun('sec-utility') || isSectionRun('sec-financial')) tabs.push('Financial');
+    // Connections tab: business, connections, screening
+    if (isSectionRun('sec-business') || isSectionRun('sec-connections') || isSectionRun('sec-screening')) tabs.push('Connections');
+    // Logs tab: always show
+    tabs.push('Logs');
+    return tabs;
+  }, [runSectionIds]);
+
+  // Fallback to Overview if current tab is not visible
+  useMemo(() => {
+    if (!visibleTabs.includes(tab as any)) {
+      setTab(visibleTabs[0]);
+    }
+  }, [visibleTabs, tab]);
+
+  const TABS = visibleTabs;
 
   const sectionBy = (id: string) => d.sections.filter((s) => s.id === id);
   const sectionFields = (id: string): ExtractedField[] => d.sections.find((s) => s.id === id)?.fields ?? [];
@@ -525,29 +590,33 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
               </Panel>
 
               <Panel title="Screening outcome" icon={<AlertTriangle size={14} className="text-amber-400" />}>
-                <div className="space-y-2">
-                  {[
-                    { label: 'Politically exposed', hit: d.screening.pep, detail: d.screening.pepDetail },
-                    { label: 'Sanctions / watchlist', hit: d.screening.sanctions, detail: d.screening.sanctionsDetail },
-                    { label: 'Insolvency', hit: d.screening.insolvency, detail: d.screening.insolvency ? 'Active insolvency proceedings' : 'No filings' },
-                    { label: 'Adverse media', hit: d.screening.adverseMedia > 0, detail: `${d.screening.adverseMedia} item(s) found` },
-                    { label: 'Criminal records', hit: d.screening.criminalRecords.length > 0, detail: `${d.screening.criminalRecords.length} record(s)` },
-                    { label: 'Civil litigation', hit: d.screening.civilLitigation > 0, detail: `${d.screening.civilLitigation} case(s)` },
-                  ].map((row) => (
-                    <div key={row.label} className={`flex items-start gap-2 rounded-lg border px-2.5 py-2 ${row.hit ? 'border-amber-800/50 bg-amber-950/25' : 'border-sky-900/50 bg-[#061020]'}`}>
-                      {row.hit ? <AlertTriangle size={12} className="text-amber-400 mt-0.5 shrink-0" /> : <CheckCircle2 size={12} className="text-emerald-400 mt-0.5 shrink-0" />}
-                      <div className="min-w-0">
-                        <div className={`text-[11px] font-semibold ${row.hit ? 'text-amber-200' : 'text-slate-300'}`}>{row.label}</div>
-                        <div className="text-[10px] text-slate-500 truncate">{row.detail}</div>
+                {isSectionRun('sec-screening') ? (
+                  <div className="space-y-2">
+                    {[
+                      { label: 'Politically exposed', hit: d.screening.pep, detail: d.screening.pepDetail },
+                      { label: 'Sanctions / watchlist', hit: d.screening.sanctions, detail: d.screening.sanctionsDetail },
+                      { label: 'Insolvency', hit: d.screening.insolvency, detail: d.screening.insolvency ? 'Active insolvency proceedings' : 'No filings' },
+                      { label: 'Adverse media', hit: d.screening.adverseMedia > 0, detail: `${d.screening.adverseMedia} item(s) found` },
+                      { label: 'Criminal records', hit: d.screening.criminalRecords.length > 0, detail: `${d.screening.criminalRecords.length} record(s)` },
+                      { label: 'Civil litigation', hit: d.screening.civilLitigation > 0, detail: `${d.screening.civilLitigation} case(s)` },
+                    ].map((row) => (
+                      <div key={row.label} className={`flex items-start gap-2 rounded-lg border px-2.5 py-2 ${row.hit ? 'border-amber-800/50 bg-amber-950/25' : 'border-sky-900/50 bg-[#061020]'}`}>
+                        {row.hit ? <AlertTriangle size={12} className="text-amber-400 mt-0.5 shrink-0" /> : <CheckCircle2 size={12} className="text-emerald-400 mt-0.5 shrink-0" />}
+                        <div className="min-w-0">
+                          <div className={`text-[11px] font-semibold ${row.hit ? 'text-amber-200' : 'text-slate-300'}`}>{row.label}</div>
+                          <div className="text-[10px] text-slate-500 truncate">{row.detail}</div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-500">PEP & sanctions screening was not included in this search.</p>
+                )}
               </Panel>
             </div>
 
             <Panel title="Data sections retrieved" subtitle="Every source queried, its state, confidence, latency and cost" icon={<Network size={14} className="text-cyan-400" />}>
-              <ResponsiveTable columns={sectionCols} rows={d.sections} rowKey={(r) => r.id} dense initialSort={{ key: 'confidence', dir: 'desc' }} />
+              <ResponsiveTable columns={sectionCols} rows={d.sections.filter((s) => runSectionIds.has(s.id))} rowKey={(r) => r.id} dense initialSort={{ key: 'confidence', dir: 'desc' }} />
             </Panel>
           </>
         )}
@@ -555,84 +624,102 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
         {/* ----------------------------- PERSONAL ----------------------------- */}
         {tab === 'Personal' && (
           <>
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Panel title="Civil registration" subtitle={sectionBy('sec-civil')[0]?.provider ?? 'IPRS Civil Registration'} icon={<UserCheck size={14} className="text-cyan-400" />}>
-                <FactGrid
-                  items={[
-                    { label: 'Full legal name', value: d.subject.fullName },
-                    { label: 'First name', value: d.subject.firstName },
-                    { label: 'Middle name', value: d.subject.middleName ?? '—' },
-                    { label: 'Last name / surname', value: d.subject.lastName },
-                    { label: 'Aliases / other names', value: d.subject.aliases.length ? d.subject.aliases.join(' · ') : 'None recorded', span: true },
-                    { label: 'Gender', value: d.subject.gender },
-                    { label: 'Date of birth', value: `${d.subject.dob} (${d.subject.dobRaw})` },
-                    { label: 'Nationality', value: d.subject.nationality },
-                    { label: 'ID number', value: masked ? m(d.subject.idNumber) : d.subject.idNumber, mono: true },
-                    { label: 'ID type', value: d.subject.idType },
-                    { label: 'Passport number', value: d.subject.passportNumber ? (masked ? m(d.subject.passportNumber) : d.subject.passportNumber) : '—', mono: true },
-                    { label: 'KRA PIN', value: masked ? m(d.subject.kraPin) : d.subject.kraPin, mono: true },
-                    { label: 'Registration serial', value: d.subject.registrationSerial ?? '—', mono: true },
-                    { label: 'Marital status', value: d.subject.maritalStatus },
-                    { label: 'Next of kin', value: masked ? m(d.subject.nextOfKin) : d.subject.nextOfKin },
-                    { label: 'Deceased flag', value: d.subject.deceased ? 'YES' : 'No' },
-                    { label: 'Biometric photo match', value: `${d.subject.photoMatchScore}%` },
-                  ]}
-                />
-              </Panel>
+            {isSectionRun('sec-civil') ? (
+              <>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <Panel title="Civil registration" subtitle={sectionBy('sec-civil')[0]?.provider ?? 'IPRS Civil Registration'} icon={<UserCheck size={14} className="text-cyan-400" />}>
+                    <FactGrid
+                      items={[
+                        { label: 'Full legal name', value: d.subject.fullName },
+                        { label: 'First name', value: d.subject.firstName },
+                        { label: 'Middle name', value: d.subject.middleName ?? '—' },
+                        { label: 'Last name / surname', value: d.subject.lastName },
+                        { label: 'Aliases / other names', value: d.subject.aliases.length ? d.subject.aliases.join(' · ') : 'None recorded', span: true },
+                        { label: 'Gender', value: d.subject.gender },
+                        { label: 'Date of birth', value: `${d.subject.dob} (${d.subject.dobRaw})` },
+                        { label: 'Nationality', value: d.subject.nationality },
+                        { label: 'ID number', value: masked ? m(d.subject.idNumber) : d.subject.idNumber, mono: true },
+                        { label: 'ID type', value: d.subject.idType },
+                        { label: 'Passport number', value: d.subject.passportNumber ? (masked ? m(d.subject.passportNumber) : d.subject.passportNumber) : '—', mono: true },
+                        { label: 'KRA PIN', value: masked ? m(d.subject.kraPin) : d.subject.kraPin, mono: true },
+                        { label: 'Registration serial', value: d.subject.registrationSerial ?? '—', mono: true },
+                        { label: 'Marital status', value: d.subject.maritalStatus },
+                        { label: 'Next of kin', value: masked ? m(d.subject.nextOfKin) : d.subject.nextOfKin },
+                        { label: 'Deceased flag', value: d.subject.deceased ? 'YES' : 'No' },
+                        { label: 'Biometric photo match', value: `${d.subject.photoMatchScore}%` },
+                      ]}
+                    />
+                  </Panel>
 
-              <Panel title="Contact & location" subtitle="Primary and alternate contacts with administrative geography" icon={<MapPin size={14} className="text-cyan-400" />}>
-                <FactGrid
-                  items={[
-                    { label: 'Primary phone', value: masked ? m(d.subject.phone) : d.subject.phone, mono: true },
-                    { label: 'Alternate phones', value: d.subject.altPhones.length ? d.subject.altPhones.map((p) => (masked ? m(p) : p)).join(' · ') : 'None', mono: true },
-                    { label: 'Email', value: masked ? m(d.subject.email) : d.subject.email, span: true },
-                    { label: 'County', value: d.subject.county },
-                    { label: 'Sub-county', value: d.subject.subCounty },
-                    { label: 'Constituency', value: d.subject.constituency },
-                    { label: 'Ward', value: d.subject.ward },
-                  ]}
-                />
-                <div className="mt-4">
-                  <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-2">Extracted civil fields (raw)</div>
-                  <div className="rounded-lg border border-sky-900/50 bg-[#050b14] divide-y divide-sky-950/70 max-h-64 overflow-y-auto">
-                    {sectionFields('sec-civil').length === 0 ? (
-                      <p className="p-3 text-[10px] text-slate-600">No raw field list for this source.</p>
-                    ) : (
-                      sectionFields('sec-civil').map((f, i) => (
-                        <div key={`${f.label}-${i}`} className="flex items-start justify-between gap-3 px-2.5 py-1.5">
-                          <span className="text-[10px] text-slate-500 shrink-0">{f.label}</span>
-                          <span className="text-[10px] text-slate-200 font-mono text-right break-all min-w-0">
-                            {masked && typeof f.value === 'string' && f.masked !== false ? m(f.value) : String(f.value ?? '—')}
-                            {f.confidence != null && <span className="ml-1.5 text-emerald-500/70">({f.confidence}%)</span>}
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
+                  <Panel title="Contact & location" subtitle="Primary and alternate contacts with administrative geography" icon={<MapPin size={14} className="text-cyan-400" />}>
+                    <FactGrid
+                      items={[
+                        { label: 'Primary phone', value: masked ? m(d.subject.phone) : d.subject.phone, mono: true },
+                        { label: 'Alternate phones', value: d.subject.altPhones.length ? d.subject.altPhones.map((p) => (masked ? m(p) : p)).join(' · ') : 'None', mono: true },
+                        { label: 'Email', value: masked ? m(d.subject.email) : d.subject.email, span: true },
+                        { label: 'County', value: d.subject.county },
+                        { label: 'Sub-county', value: d.subject.subCounty },
+                        { label: 'Constituency', value: d.subject.constituency },
+                        { label: 'Ward', value: d.subject.ward },
+                      ]}
+                    />
+                    <div className="mt-4">
+                      <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-2">Extracted civil fields (raw)</div>
+                      <div className="rounded-lg border border-sky-900/50 bg-[#050b14] divide-y divide-sky-950/70 max-h-64 overflow-y-auto">
+                        {sectionFields('sec-civil').length === 0 ? (
+                          <p className="p-3 text-[10px] text-slate-600">No raw field list for this source.</p>
+                        ) : (
+                          sectionFields('sec-civil').map((f, i) => (
+                            <div key={`${f.label}-${i}`} className="flex items-start justify-between gap-3 px-2.5 py-1.5">
+                              <span className="text-[10px] text-slate-500 shrink-0">{f.label}</span>
+                              <span className="text-[10px] text-slate-200 font-mono text-right break-all min-w-0">
+                                {masked && typeof f.value === 'string' && f.masked !== false ? m(f.value) : String(f.value ?? '—')}
+                                {f.confidence != null && <span className="ml-1.5 text-emerald-500/70">({f.confidence}%)</span>}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </Panel>
                 </div>
-              </Panel>
-            </div>
 
-            <Panel title="Address history" subtitle={`${d.addresses.length} record(s) across postal, physical and utility-confirmed sources`} icon={<MapPin size={14} className="text-cyan-400" />}>
-              <ResponsiveTable columns={addressCols} rows={d.addresses} rowKey={(r) => r.id} dense emptyTitle="No address records" />
-            </Panel>
+                <Panel title="Address history" subtitle={`${d.addresses.length} record(s) across postal, physical and utility-confirmed sources`} icon={<MapPin size={14} className="text-cyan-400" />}>
+                  <ResponsiveTable columns={addressCols} rows={d.addresses} rowKey={(r) => r.id} dense emptyTitle="No address records" />
+                </Panel>
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Panel title="Identity documents" icon={<FileText size={14} className="text-cyan-400" />}>
-                <ResponsiveTable columns={docCols} rows={d.documents} rowKey={(r) => r.id} dense emptyTitle="No documents on file" />
-              </Panel>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <Panel title="Identity documents" icon={<FileText size={14} className="text-cyan-400" />}>
+                    <ResponsiveTable columns={docCols} rows={d.documents} rowKey={(r) => r.id} dense emptyTitle="No documents on file" />
+                  </Panel>
+                  <Panel title="Employment history" icon={<Briefcase size={14} className="text-cyan-400" />}>
+                    <ResponsiveTable columns={empCols} rows={d.employment} rowKey={(r) => r.id} dense emptyTitle="No employment records" />
+                  </Panel>
+                </div>
+              </>
+            ) : (
+              <Callout tone="info" title="Civil registration not included in this search">
+                <p className="text-[11px] text-slate-300">The ID verification check (kyc-id) was not selected for this search. Re-run with the appropriate checks to populate this section.</p>
+              </Callout>
+            )}
+
+            {isSectionRun('sec-employer') ? (
               <Panel title="Employment history" icon={<Briefcase size={14} className="text-cyan-400" />}>
                 <ResponsiveTable columns={empCols} rows={d.employment} rowKey={(r) => r.id} dense emptyTitle="No employment records" />
               </Panel>
-            </div>
+            ) : (
+              <Callout tone="info" title="Employment verification not included in this search">
+                <p className="text-[11px] text-slate-300">The employer verification check (kyc-employer) was not selected for this search. Re-run with the appropriate checks to populate this section.</p>
+              </Callout>
+            )}
           </>
         )}
 
         {/* ----------------------------- FINANCIAL ----------------------------- */}
         {tab === 'Financial' && (
           <>
-            <div className="grid gap-4 lg:grid-cols-3">
-              <Panel title="Tax standing — KRA" icon={<Landmark size={14} className="text-emerald-400" />} className="lg:col-span-2">
+            {isSectionRun('sec-kra') ? (
+              <Panel title="Tax standing — KRA" icon={<Landmark size={14} className="text-emerald-400" />}>
                 <FactGrid
                   items={[
                     { label: 'PIN', value: masked ? m(d.tax.pin) : d.tax.pin, mono: true },
@@ -662,7 +749,13 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
                   </div>
                 </div>
               </Panel>
+            ) : (
+              <Callout tone="info" title="KRA tax verification not included in this search">
+                <p className="text-[11px] text-slate-300">The KRA PIN verification check (kyc-kra) was not selected for this search. Re-run with the appropriate checks to populate this section.</p>
+              </Callout>
+            )}
 
+            {isSectionRun('sec-mpesa') ? (
               <Panel title="Mobile money — M-PESA" icon={<Zap size={14} className="text-emerald-400" />}>
                 <FactGrid
                   columns={2}
@@ -681,10 +774,14 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
                   ]}
                 />
               </Panel>
-            </div>
+            ) : (
+              <Callout tone="info" title="M-PESA verification not included in this search">
+                <p className="text-[11px] text-slate-300">The M-PESA name & number match check (kyc-mpesa) was not selected for this search. Re-run with the appropriate checks to populate this section.</p>
+              </Callout>
+            )}
 
-            <div className="grid gap-4 lg:grid-cols-3">
-              <Panel title="Credit bureau" subtitle={`${d.credit.bureau} — score, exposure and utilisation`} icon={<Gauge size={14} className="text-cyan-400" />} className="lg:col-span-2">
+            {isSectionRun('sec-crb') ? (
+              <Panel title="Credit bureau" subtitle={`${d.credit.bureau} — score, exposure and utilisation`} icon={<Gauge size={14} className="text-cyan-400" />}>
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   {[
                     { label: 'Credit score', value: `${d.credit.score}`, sub: d.credit.scoreBand },
@@ -725,7 +822,13 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
                   </Callout>
                 )}
               </Panel>
+            ) : (
+              <Callout tone="info" title="Credit bureau check not included in this search">
+                <p className="text-[11px] text-slate-300">The CRB credit check (kyc-crb) was not selected for this search. Re-run with the appropriate checks to populate this section.</p>
+              </Callout>
+            )}
 
+            {isSectionRun('sec-utility') ? (
               <Panel title="Utility account" icon={<Zap size={14} className="text-amber-400" />}>
                 <FactGrid
                   columns={2}
@@ -745,66 +848,90 @@ export const Screen4_IdentityProfile: React.FC<Props> = ({ onViewDetailedReport 
                   history raise the address confidence score.
                 </div>
               </Panel>
-            </div>
+            ) : (
+              <Callout tone="info" title="Utility verification not included in this search">
+                <p className="text-[11px] text-slate-300">The KPLC location check (kyc-address) was not selected for this search. Re-run with the appropriate checks to populate this section.</p>
+              </Callout>
+            )}
           </>
         )}
 
         {/* ----------------------------- CONNECTIONS ----------------------------- */}
         {tab === 'Connections' && (
           <>
-            <div className="grid gap-4 lg:grid-cols-5">
-              {/* Relationship graph */}
-              <Panel
-                title="Relationship graph"
-                subtitle={`${d.relationships.length} link(s) — subject at the centre, coloured by link type`}
-                icon={<Network size={14} className="text-cyan-400" />}
-                className="lg:col-span-2"
-              >
-                {d.relationships.length === 0 ? (
-                  <EmptyState title="No relationships detected" description="No family, business or financial links were returned." />
-                ) : (
-                  <RelationshipGraph links={d.relationships} subject={d.subject.fullName} />
-                )}
-              </Panel>
+            {isSectionRun('sec-connections') ? (
+              <>
+                <div className="grid gap-4 lg:grid-cols-5">
+                  {/* Relationship graph */}
+                  <Panel
+                    title="Relationship graph"
+                    subtitle={`${d.relationships.length} link(s) — subject at the centre, coloured by link type`}
+                    icon={<Network size={14} className="text-cyan-400" />}
+                    className="lg:col-span-2"
+                  >
+                    {d.relationships.length === 0 ? (
+                      <EmptyState title="No relationships detected" description="No family, business or financial links were returned." />
+                    ) : (
+                      <RelationshipGraph links={d.relationships} subject={d.subject.fullName} />
+                    )}
+                  </Panel>
 
-              <Panel title="Relationship detail" icon={<Network size={14} className="text-cyan-400" />} className="lg:col-span-3">
-                <ResponsiveTable columns={linkCols} rows={d.relationships} rowKey={(r) => r.id} dense emptyTitle="No relationship links" />
-              </Panel>
-            </div>
-
-            <Panel
-              title="Business & beneficial ownership"
-              subtitle={`${d.business.links.length} company link(s) · director: ${d.business.isDirector ? 'yes' : 'no'} · beneficial owner: ${d.business.isBeneficialOwner ? 'yes' : 'no'} · sole proprietorships: ${d.business.soleProprietorships}`}
-              icon={<Building2 size={14} className="text-cyan-400" />}
-            >
-              <ResponsiveTable columns={bizCols} rows={d.business.links} rowKey={(r) => r.id} dense emptyTitle="No business links" />
-            </Panel>
-
-            {(d.screening.criminalRecords.length > 0 || d.screening.civilLitigation > 0 || d.screening.pep || d.screening.sanctions) && (
-              <Callout tone="warning" title="Screening hits requiring attention">
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {d.screening.criminalRecords.map((c) => (
-                    <div key={c.id} className="rounded-lg border border-amber-900/40 bg-amber-950/20 px-2.5 py-2 text-[11px]">
-                      <div className="font-semibold text-amber-200">{c.charge}</div>
-                      <div className="text-[10px] text-slate-400 font-mono">
-                        {c.caseNo} · {c.court} · filed {formatDate(c.filedOn)}
-                      </div>
-                      <div className="text-[10px] text-slate-300 mt-0.5">Outcome: {c.outcome}</div>
-                    </div>
-                  ))}
-                  {d.screening.pep && (
-                    <div className="rounded-lg border border-amber-900/40 bg-amber-950/20 px-2.5 py-2 text-[11px]">
-                      <div className="font-semibold text-amber-200">Politically exposed person</div>
-                      <div className="text-[10px] text-slate-400">{d.screening.pepDetail}</div>
-                    </div>
-                  )}
-                  {d.screening.sanctions && (
-                    <div className="rounded-lg border border-rose-900/40 bg-rose-950/20 px-2.5 py-2 text-[11px]">
-                      <div className="font-semibold text-rose-200">Sanctions / watchlist match</div>
-                      <div className="text-[10px] text-slate-400">{d.screening.sanctionsDetail}</div>
-                    </div>
-                  )}
+                  <Panel title="Relationship detail" icon={<Network size={14} className="text-cyan-400" />} className="lg:col-span-3">
+                    <ResponsiveTable columns={linkCols} rows={d.relationships} rowKey={(r) => r.id} dense emptyTitle="No relationship links" />
+                  </Panel>
                 </div>
+              </>
+            ) : (
+              <Callout tone="info" title="Relationship graph not included in this search">
+                <p className="text-[11px] text-slate-300">The connections check was not run for this search. Re-run with the appropriate checks to populate this section.</p>
+              </Callout>
+            )}
+
+            {isSectionRun('sec-business') ? (
+              <Panel
+                title="Business & beneficial ownership"
+                subtitle={`${d.business.links.length} company link(s) · director: ${d.business.isDirector ? 'yes' : 'no'} · beneficial owner: ${d.business.isBeneficialOwner ? 'yes' : 'no'} · sole proprietorships: ${d.business.soleProprietorships}`}
+                icon={<Building2 size={14} className="text-cyan-400" />}
+              >
+                <ResponsiveTable columns={bizCols} rows={d.business.links} rowKey={(r) => r.id} dense emptyTitle="No business links" />
+              </Panel>
+            ) : (
+              <Callout tone="info" title="Business verification not included in this search">
+                <p className="text-[11px] text-slate-300">The KYB entity checks (kyb-registry, kyb-directors, etc.) were not selected for this search. Re-run with the appropriate checks to populate this section.</p>
+              </Callout>
+            )}
+
+            {isSectionRun('sec-screening') ? (
+              (d.screening.criminalRecords.length > 0 || d.screening.civilLitigation > 0 || d.screening.pep || d.screening.sanctions) && (
+                <Callout tone="warning" title="Screening hits requiring attention">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {d.screening.criminalRecords.map((c) => (
+                      <div key={c.id} className="rounded-lg border border-amber-900/40 bg-amber-950/20 px-2.5 py-2 text-[11px]">
+                        <div className="font-semibold text-amber-200">{c.charge}</div>
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          {c.caseNo} · {c.court} · filed {formatDate(c.filedOn)}
+                        </div>
+                        <div className="text-[10px] text-slate-300 mt-0.5">Outcome: {c.outcome}</div>
+                      </div>
+                    ))}
+                    {d.screening.pep && (
+                      <div className="rounded-lg border border-amber-900/40 bg-amber-950/20 px-2.5 py-2 text-[11px]">
+                        <div className="font-semibold text-amber-200">Politically exposed person</div>
+                        <div className="text-[10px] text-slate-400">{d.screening.pepDetail}</div>
+                      </div>
+                    )}
+                    {d.screening.sanctions && (
+                      <div className="rounded-lg border border-rose-900/40 bg-rose-950/20 px-2.5 py-2 text-[11px]">
+                        <div className="font-semibold text-rose-200">Sanctions / watchlist match</div>
+                        <div className="text-[10px] text-slate-400">{d.screening.sanctionsDetail}</div>
+                      </div>
+                    )}
+                  </div>
+                </Callout>
+              )
+            ) : (
+              <Callout tone="info" title="PEP & sanctions screening not included in this search">
+                <p className="text-[11px] text-slate-300">The AML & PEP screen check (kyc-pep) was not selected for this search. Re-run with the appropriate checks to populate this section.</p>
               </Callout>
             )}
           </>

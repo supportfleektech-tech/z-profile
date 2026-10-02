@@ -821,6 +821,12 @@ export const primaryDossier: Dossier = {
   },
   sections,
   events,
+  meta: {
+    checkIds: [],
+    skipTracing: false,
+    consentRef: '',
+    purpose: '',
+  },
   attestation: {
     preparedBy: 'Sarah Wanjiku',
     preparedByTier: 'user',

@@ -783,6 +783,13 @@ export function priceChecks(itemIds: string[]): { total: number; breakdown: { id
 /* ------------------------------ provenance helper ------------------------------ */
 
 /**
+ * Item IDs that are classified as "skip-tracing" searches.
+ * When the skip-tracing checkbox is enabled, these items are filtered OUT of the catalogue.
+ * Currently only the PHONESEARCH (kyc-phonebyid) is classified as skip-tracing.
+ */
+export const TRACING_IDS: Set<string> = new Set(['kyc-phonebyid']);
+
+/**
  * Per-item provenance for the pricing banners.
  *
  * The catalogue-level `confirmedFromProposal` is deliberately all-or-nothing, so on its
